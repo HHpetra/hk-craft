@@ -1,0 +1,98 @@
+@import "tailwindcss";
+
+:root,
+:root[data-theme="dark"] {
+  --bg: #0c0c0e;
+  --bg-sidebar: #101012;
+  --bg-panel: #121214;
+  --bg-elevated: #16161a;
+  --bg-header: #141416;
+  --bg-term: #0e0e10;
+  --fg: #e4e4e7;
+  --fg-muted: #a1a1aa;
+  --fg-subtle: #71717a;
+  --border: rgb(255 255 255 / 0.06);
+  --hover: rgb(255 255 255 / 0.05);
+  --active: rgb(255 255 255 / 0.08);
+  --input: rgb(255 255 255 / 0.05);
+  --btn: #e4e4e7;
+  --btn-fg: #18181b;
+}
+
+:root[data-theme="light"] {
+  --bg: #f4f4f5;
+  --bg-sidebar: #ececee;
+  --bg-panel: #f7f7f8;
+  --bg-elevated: #ffffff;
+  --bg-header: #f0f0f2;
+  --bg-term: #fafafa;
+  --fg: #18181b;
+  --fg-muted: #52525b;
+  --fg-subtle: #71717a;
+  --border: rgb(24 24 27 / 0.1);
+  --hover: rgb(24 24 27 / 0.05);
+  --active: rgb(24 24 27 / 0.08);
+  --input: rgb(24 24 27 / 0.05);
+  --btn: #18181b;
+  --btn-fg: #fafafa;
+}
+
+@theme inline {
+  --color-surface: var(--bg);
+  --color-surface-sidebar: var(--bg-sidebar);
+  --color-surface-panel: var(--bg-panel);
+  --color-surface-elevated: var(--bg-elevated);
+  --color-surface-header: var(--bg-header);
+  --color-surface-term: var(--bg-term);
+  --color-ink: var(--fg);
+  --color-ink-muted: var(--fg-muted);
+  --color-ink-subtle: var(--fg-subtle);
+  --color-line: var(--border);
+  --color-hover: var(--hover);
+  --color-active: var(--active);
+  --color-field: var(--input);
+  --color-btn: var(--btn);
+  --color-btn-fg: var(--btn-fg);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: "Segoe UI", system-ui, sans-serif;
+  font-size: 13px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+.xterm,
+.xterm-viewport,
+.xterm-screen {
+  height: 100%;
+}
+
+.xterm {
+  padding: 8px;
+}
+
+[data-separator] {
+  width: 5px;
+  background: transparent;
+}
+
+[data-separator]:hover,
+[data-separator][data-active] {
+  background: var(--hover);
+}
