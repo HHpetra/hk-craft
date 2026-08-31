@@ -13,12 +13,12 @@ export function ProjectDialog() {
   const [preset, setPreset] = useState(presets[0]?.id ?? "cursor-agent");
 
   useEffect(() => {
-    if (open) {
-      setName("");
-      setPath("");
-      setPreset(presets[0]?.id ?? "cursor-agent");
-    }
-  }, [open, presets]);
+    if (!open) return;
+    setName("");
+    setPath("");
+    const list = useWorkspace.getState().config?.agent_presets ?? [];
+    setPreset(list[0]?.id ?? "cursor-agent");
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;

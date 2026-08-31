@@ -45,3 +45,7 @@ export function ptyKill(sessionId: string) {
 export function ptyList() {
   return invoke<string[]>("pty_list");
 }
+
+export function discoverAgentSession(command: string, cwd: string) {
+  return invoke<string | null>("discover_agent_session", { command, cwd });
+}

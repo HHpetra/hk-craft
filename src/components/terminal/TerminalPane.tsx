@@ -1,77 +1,15 @@
 import { useEffect, useRef } from "react";
-import { Terminal } from "@xterm/xterm";
-import { FitAddon } from "@xterm/addon-fit";
-import { WebglAddon } from "@xterm/addon-webgl";
-import { listen } from "@tauri-apps/api/event";
 import type { DragEvent } from "react";
-import { ptyResize, ptyWrite } from "../../lib/api";
+import { ptyWrite } from "../../lib/api";
 import { cn, formatAgentInject, formatRunnerInject } from "../../lib/format";
-import { normalizeTheme, xtermThemes } from "../../lib/theme";
-import type { PtyOutput, SessionKind } from "../../types";
+import {
+  fitAndResize,
+  getOrCreateTerminal,
+} from "../../lib/termRegistry";
+import type { SessionKind } from "../../types";
 import { useWorkspace } from "../../store/workspace";
 
-type RegistryEntry = {
-  term: Terminal;
-  fit: FitAddon;
-  host: HTMLDivElement;
-};
-
-const registry = new Map<string, RegistryEntry>();
-
-function getOrCreateTerminal(sessionId: string): RegistryEntry {
-  const existing = registry.get(sessionId);
-  if (existing) return existing;
-
-  const term = new Terminal({
-    cursorBlink: true,
-    fontSize: 13,
-    fontFamily: 'Consolas, "Cascadia Code", "Courier New", monospace',
-    theme: xtermThemes[normalizeTheme(document.documentElement.dataset.theme)],
-    scrollback: 5000,
-    allowProposedApi: true,
-  });
-  const fit = new FitAddon();
-  term.loadAddon(fit);
-  try {
-    const webgl = new WebglAddon();
-    webgl.onContextLoss(() => webgl.dispose());
-    term.loadAddon(webgl);
-  } catch {
-    // canvas renderer fallback
-  }
-
-  const host = document.createElement("div");
-  host.style.width = "100%";
-  host.style.height = "100%";
-  term.open(host);
-
-  term.onData((data) => {
-    void ptyWrite(sessionId, data).catch(() => undefined);
-  });
-
-  void listen<PtyOutput>("pty-output", (event) => {
-    if (event.payload.session_id === sessionId) {
-      term.write(event.payload.data);
-    }
-  });
-
-  registry.set(sessionId, { term, fit, host });
-  return { term, fit, host };
-}
-
-export function applyRegisteredXtermTheme(theme: string) {
-  const next = xtermThemes[normalizeTheme(theme)];
-  for (const entry of registry.values()) {
-    entry.term.options.theme = next;
-  }
-}
-
-function fitAndResize(sessionId: string, entry: RegistryEntry) {
-  const dims = entry.fit.proposeDimensions();
-  if (!dims || dims.cols < 2 || dims.rows < 2) return;
-  entry.fit.fit();
-  void ptyResize(sessionId, entry.term.cols, entry.term.rows).catch(() => undefined);
-}
+export { applyRegisteredXtermTheme } from "../../lib/termRegistry";
 
 interface TerminalPaneProps {
   sessionId: string;
@@ -94,8 +32,7 @@ export function TerminalPane({ sessionId, kind, interactive }: TerminalPaneProps
     if (!container) return;
     const entry = getOrCreateTerminal(sessionId);
     if (entry.host.parentElement !== container) {
-      container.innerHTML = "";
-      container.appendChild(entry.host);
+      container.replaceChildren(entry.host);
     }
     const ro = new ResizeObserver(() => {
       if (!interactive) return;

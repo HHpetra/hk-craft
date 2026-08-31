@@ -6,6 +6,17 @@ export function useHotkeys(setViewMode: (mode: ViewMode) => void) {
     const onKey = (event: KeyboardEvent) => {
       if (!event.ctrlKey && !event.metaKey) return;
       if (event.altKey || event.shiftKey) return;
+      const target = event.target as HTMLElement | null;
+      if (
+        target &&
+        !target.closest(".xterm") &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT" ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
       const map: Record<string, ViewMode> = {
         "1": "explorer",
         "2": "agent",

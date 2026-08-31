@@ -5,10 +5,8 @@ import { formatAgentInject, formatRunnerInject, sessionId } from "../lib/format"
 import { useWorkspace } from "../store/workspace";
 
 export function useOsFileDrop() {
-  const activeProjectId = useWorkspace((s) => s.activeProjectId);
-  const config = useWorkspace((s) => s.config);
-
   useEffect(() => {
+    let cancelled = false;
     let unlisten: (() => void) | undefined;
     void getCurrentWebview()
       .onDragDropEvent((event) => {
@@ -16,12 +14,10 @@ export function useOsFileDrop() {
         const { paths, position } = event.payload;
         if (!paths.length) return;
         const factor = window.devicePixelRatio || 1;
-        const x = "toLogical" in position && typeof position.toLogical === "function"
-          ? position.toLogical(factor).x
-          : position.x / factor;
-        const y = "toLogical" in position && typeof position.toLogical === "function"
-          ? position.toLogical(factor).y
-          : position.y / factor;
+        const logical =
+          typeof position.toLogical === "function" ? position.toLogical(factor) : null;
+        const x = logical ? logical.x : position.x / factor;
+        const y = logical ? logical.y : position.y / factor;
         const el = document.elementFromPoint(x, y);
         const pane = el?.closest("[data-drop-kind]") as HTMLElement | null;
         const kind = pane?.getAttribute("data-drop-kind");
@@ -43,11 +39,16 @@ export function useOsFileDrop() {
         void ptyWrite(sessionId(projectId, kind), text).catch(() => undefined);
       })
       .then((fn) => {
+        if (cancelled) {
+          fn();
+          return;
+        }
         unlisten = fn;
       })
       .catch(() => undefined);
     return () => {
+      cancelled = true;
       unlisten?.();
     };
-  }, [activeProjectId, config]);
+  }, []);
 }

@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import type { PtyExit, PtyOutput, SessionStatus } from "../types";
 import { notifyTaskDone } from "../lib/notify";
 import { sessionKindLabel } from "../lib/status";
+import { isCurrentGeneration } from "../lib/termRegistry";
 import { useWorkspace } from "../store/workspace";
 
 const SILENCE_MS = 1500;
@@ -69,29 +70,45 @@ export function usePtyStatusListener() {
   const setSessionStatus = useWorkspace((s) => s.setSessionStatus);
 
   useEffect(() => {
+    let cancelled = false;
     const unsubs: Array<() => void> = [];
 
     void listen<PtyOutput>("pty-output", (event) => {
       const id = event.payload.session_id;
+      if (!isCurrentGeneration(id, event.payload.generation ?? 0)) return;
       const track = getTrack(id);
       track.lastOutput = Date.now();
       if (track.runningSince === null) track.runningSince = Date.now();
       const current = useWorkspace.getState().sessionStatus[id];
       if (current !== "running") setSessionStatus(id, "running");
       scheduleSilence(id);
-    }).then((fn) => unsubs.push(fn));
+    }).then((fn) => {
+      if (cancelled) {
+        fn();
+        return;
+      }
+      unsubs.push(fn);
+    });
 
     void listen<PtyExit>("pty-exit", (event) => {
       const id = event.payload.session_id;
+      if (!isCurrentGeneration(id, event.payload.generation ?? 0)) return;
       const track = getTrack(id);
       clearTimer(track);
       maybeNotify(id, track.runningSince);
       track.runningSince = null;
       const next: SessionStatus = event.payload.success ? "exited" : "error";
       setSessionStatus(id, next);
-    }).then((fn) => unsubs.push(fn));
+    }).then((fn) => {
+      if (cancelled) {
+        fn();
+        return;
+      }
+      unsubs.push(fn);
+    });
 
     return () => {
+      cancelled = true;
       unsubs.forEach((fn) => fn());
     };
   }, [setSessionStatus]);

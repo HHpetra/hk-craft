@@ -13,6 +13,8 @@ export interface Settings {
   default_split_ratio: number[];
   active_project_id: string | null;
   explorer_view: string;
+  resume_on_start: boolean;
+  terminal_font: string;
 }
 
 export interface AgentPreset {
@@ -32,6 +34,8 @@ export interface Project {
   name: string;
   path: string;
   agent_preset: string;
+  agent_seen: boolean;
+  agent_session_id: string | null;
 }
 
 export interface AppConfig {
@@ -53,17 +57,20 @@ export interface FileEntry {
 export interface SpawnResult {
   session_id: string;
   reused: boolean;
+  generation: number;
 }
 
 export interface PtyOutput {
   session_id: string;
   data: string;
+  generation?: number;
 }
 
 export interface PtyExit {
   session_id: string;
   success: boolean;
   code: number;
+  generation?: number;
 }
 
 export interface SpawnOpts {

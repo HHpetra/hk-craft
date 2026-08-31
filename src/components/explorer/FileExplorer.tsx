@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Folder, File as FileIcon, LayoutGrid, List, Search } from "lucide-react";
 import type { DragEvent } from "react";
 import { fsList } from "../../lib/api";
-import { breadcrumbParts, cn, formatSize, formatTime } from "../../lib/format";
+import { breadcrumbParts, cn, formatSize, formatTime, pathsEqual } from "../../lib/format";
 import type { Bookmark, ExplorerView, FileEntry } from "../../types";
 import { useActiveProject, useWorkspace } from "../../store/workspace";
 
@@ -126,8 +126,7 @@ export function FileExplorer() {
         </div>
         <div className="flex-1 overflow-auto">
           {bookmarkItems.map((item) => {
-            const active =
-              root.replace(/\\/g, "/").toLowerCase() === item.path.replace(/\\/g, "/").toLowerCase();
+            const active = pathsEqual(root, item.path);
             return (
               <button
                 key={`${item.name}:${item.path}`}

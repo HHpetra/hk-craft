@@ -7,7 +7,7 @@ use tauri::State;
 use crate::error::{AppError, AppResult};
 use crate::AppState;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AppConfig {
     #[serde(default)]
     pub settings: Settings,
@@ -19,7 +19,7 @@ pub struct AppConfig {
     pub projects: Vec<Project>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Settings {
     #[serde(default = "default_theme")]
     pub theme: String,
@@ -29,9 +29,13 @@ pub struct Settings {
     pub active_project_id: Option<String>,
     #[serde(default = "default_explorer_view")]
     pub explorer_view: String,
+    #[serde(default = "default_true")]
+    pub resume_on_start: bool,
+    #[serde(default)]
+    pub terminal_font: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AgentPreset {
     pub id: String,
     pub name: String,
@@ -40,13 +44,13 @@ pub struct AgentPreset {
     pub drag_prefix: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Bookmark {
     pub name: String,
     pub path: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Project {
     #[serde(default)]
     pub id: String,
@@ -54,6 +58,10 @@ pub struct Project {
     pub path: String,
     #[serde(default)]
     pub agent_preset: String,
+    #[serde(default = "default_true")]
+    pub agent_seen: bool,
+    #[serde(default)]
+    pub agent_session_id: Option<String>,
 }
 
 impl Default for AppConfig {
@@ -74,6 +82,8 @@ impl Default for Settings {
             default_split_ratio: default_split_ratio(),
             active_project_id: None,
             explorer_view: default_explorer_view(),
+            resume_on_start: true,
+            terminal_font: String::new(),
         }
     }
 }
@@ -88,6 +98,10 @@ fn default_explorer_view() -> String {
 
 fn default_split_ratio() -> Vec<f64> {
     vec![30.0, 40.0, 30.0]
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_drag_prefix() -> String {
@@ -175,15 +189,9 @@ pub fn load_from_disk(path: &Path) -> AppResult<AppConfig> {
     }
     let raw = fs::read_to_string(path)?;
     let mut cfg: AppConfig = toml::from_str(&raw)?;
-    let before = cfg.projects.clone();
+    let before = cfg.clone();
     cfg.migrate();
-    if cfg.projects.iter().any(|p| {
-        before
-            .iter()
-            .find(|b| b.path == p.path)
-            .map(|b| b.id.is_empty())
-            .unwrap_or(false)
-    }) {
+    if cfg != before {
         let _ = save_to_disk(path, &cfg);
     }
     Ok(cfg)
@@ -238,6 +246,8 @@ mod tests {
                 name: "demo".into(),
                 path: "C:/tmp".into(),
                 agent_preset: String::new(),
+                agent_seen: true,
+                agent_session_id: None,
             }],
             ..AppConfig::default()
         };

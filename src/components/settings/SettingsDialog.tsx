@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { FolderOpen, Plus, Trash2, X } from "lucide-react";
 import type { AgentPreset, Bookmark } from "../../types";
 import { pickDirectory } from "../../lib/dialog";
+import { discoverLocalNerdFonts, listDetectedNerdFonts } from "../../lib/termRegistry";
 import { normalizeTheme } from "../../lib/theme";
 import { useWorkspace } from "../../store/workspace";
 
@@ -11,17 +12,27 @@ export function SettingsDialog() {
   const config = useWorkspace((s) => s.config);
   const persist = useWorkspace((s) => s.persist);
   const setTheme = useWorkspace((s) => s.setTheme);
+  const setResumeOnStart = useWorkspace((s) => s.setResumeOnStart);
+  const setTerminalFont = useWorkspace((s) => s.setTerminalFont);
   const setNotice = useWorkspace((s) => s.setNotice);
   const [presets, setPresets] = useState<AgentPreset[]>([]);
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
+  const [projectPresets, setProjectPresets] = useState<Record<string, string>>({});
   const [bookmarkName, setBookmarkName] = useState("");
   const [bookmarkPath, setBookmarkPath] = useState("");
+  const [nerdFonts, setNerdFonts] = useState<string[]>(() => listDetectedNerdFonts());
 
   useEffect(() => {
-    if (!open || !config) return;
-    setPresets(config.agent_presets.map((p) => ({ ...p })));
-    setBookmarks(config.bookmarks.map((b) => ({ ...b })));
-  }, [open, config]);
+    if (!open) return;
+    const current = useWorkspace.getState().config;
+    if (!current) return;
+    setPresets(current.agent_presets.map((p) => ({ ...p })));
+    setBookmarks(current.bookmarks.map((b) => ({ ...b })));
+    setProjectPresets(
+      Object.fromEntries(current.projects.map((p) => [p.id, p.agent_preset])),
+    );
+    void discoverLocalNerdFonts().then(setNerdFonts);
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -44,18 +55,32 @@ export function SettingsDialog() {
       return;
     }
     const fallback = presets[0].id;
-    const projects = current.projects.map((project) =>
-      presets.some((p) => p.id === project.agent_preset)
-        ? project
-        : { ...project, agent_preset: fallback },
-    );
+    const projects = current.projects.map((project) => {
+      const bound = projectPresets[project.id] ?? project.agent_preset;
+      return {
+        ...project,
+        agent_preset: presets.some((p) => p.id === bound) ? bound : fallback,
+      };
+    });
     void persist({
       ...current,
       agent_presets: presets,
       bookmarks,
       projects,
+    }).then((ok) => {
+      if (!ok) return;
+      setOpen(false);
+      const { openedProjectIds, restartSession } = useWorkspace.getState();
+      for (const project of projects) {
+        if (!openedProjectIds.includes(project.id)) continue;
+        const prev = current.projects.find((p) => p.id === project.id);
+        const prevCmd = current.agent_presets.find((p) => p.id === prev?.agent_preset)?.command;
+        const nextCmd = presets.find((p) => p.id === project.agent_preset)?.command;
+        if (prevCmd !== nextCmd) {
+          void restartSession(project.id, "agent");
+        }
+      }
     });
-    setOpen(false);
   }
 
   return (
@@ -84,6 +109,49 @@ export function SettingsDialog() {
               </button>
             ))}
           </div>
+        </section>
+
+        <section className="mb-5">
+          <div className="mb-2 text-xs text-ink-subtle">终端字体</div>
+          <select
+            value={config.settings.terminal_font ?? ""}
+            onChange={(e) => void setTerminalFont(e.target.value)}
+            className="w-full rounded-md bg-field px-2 py-1.5 text-ink outline-none"
+          >
+            <option value="" className="bg-surface-elevated">
+              自动（优先本机 Nerd Font）
+            </option>
+            {[
+              ...new Set([
+                ...(config.settings.terminal_font ? [config.settings.terminal_font] : []),
+                ...nerdFonts,
+              ]),
+            ]
+              .filter(Boolean)
+              .map((family) => (
+              <option key={family} value={family} className="bg-surface-elevated">
+                {family}
+              </option>
+            ))}
+          </select>
+          <p className="mt-1 text-[11px] text-ink-subtle">
+            自动模式优先使用本机已安装的 Nerd Font（例如 Maple Mono NF CN），没有再用内置字体。
+          </p>
+        </section>
+
+        <section className="mb-5">
+          <div className="mb-2 text-xs text-ink-subtle">Agent 会话</div>
+          <label className="flex items-center gap-2 text-ink">
+            <input
+              type="checkbox"
+              checked={config.settings.resume_on_start !== false}
+              onChange={(e) => void setResumeOnStart(e.target.checked)}
+            />
+            启动时按项目恢复上次的 Agent 会话
+          </label>
+          <p className="mt-1 text-[11px] text-ink-subtle">
+            每个项目会记住当前会话 ID，下次用 --resume / --session 精确接上。多个项目互不影响。终端画面不会恢复。
+          </p>
         </section>
 
         <section className="mb-5">
@@ -167,14 +235,9 @@ export function SettingsDialog() {
               <label key={project.id} className="flex items-center gap-2">
                 <span className="w-40 truncate text-ink">{project.name}</span>
                 <select
-                  value={project.agent_preset}
+                  value={projectPresets[project.id] ?? project.agent_preset}
                   onChange={(e) =>
-                    void persist({
-                      ...config,
-                      projects: config.projects.map((p) =>
-                        p.id === project.id ? { ...p, agent_preset: e.target.value } : p,
-                      ),
-                    })
+                    setProjectPresets((s) => ({ ...s, [project.id]: e.target.value }))
                   }
                   className="flex-1 rounded-md bg-field px-2 py-1 text-ink outline-none"
                 >

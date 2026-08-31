@@ -32,14 +32,45 @@ export function sessionId(projectId: string, kind: "agent" | "runner") {
   return `${projectId}:${kind}`;
 }
 
+export function resumeArgsForSession(command: string, sessionId: string | null | undefined): string[] {
+  if (!sessionId?.trim()) return [];
+  const bin =
+    command
+      .trim()
+      .split(/\s+/)[0]
+      ?.replace(/\\/g, "/")
+      .split("/")
+      .pop()
+      ?.replace(/\.(exe|cmd)$/i, "")
+      .toLowerCase() ?? "";
+  if (bin === "cursor-agent" || bin === "agent" || bin === "claude") {
+    return ["--resume", sessionId];
+  }
+  if (bin === "opencode") return ["--session", sessionId];
+  return [];
+}
+
+export function normalizeFsPath(path: string) {
+  return path.replace(/\\/g, "/").replace(/\/+$/, "");
+}
+
+export function pathsEqual(a: string, b: string) {
+  return normalizeFsPath(a).toLowerCase() === normalizeFsPath(b).toLowerCase();
+}
+
+export function isPathWithin(root: string, current: string) {
+  const r = normalizeFsPath(root).toLowerCase();
+  const c = normalizeFsPath(current).toLowerCase();
+  return c === r || c.startsWith(`${r}/`);
+}
+
 export function breadcrumbParts(root: string, current: string, rootLabel: string) {
-  const norm = (p: string) => p.replace(/\\/g, "/").replace(/\/+$/, "");
   const sep = current.includes("\\") ? "\\" : "/";
-  const r = norm(root);
-  const c = norm(current);
+  const r = normalizeFsPath(root);
+  const c = normalizeFsPath(current);
   const parts = [{ label: rootLabel, path: root }];
-  if (c.toLowerCase() === r.toLowerCase()) return parts;
-  if (!c.toLowerCase().startsWith(r.toLowerCase())) {
+  if (pathsEqual(root, current)) return parts;
+  if (!isPathWithin(root, current)) {
     return [{ label: current, path: current }];
   }
   const rel = c.slice(r.length).replace(/^\//, "");

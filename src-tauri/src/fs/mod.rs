@@ -115,4 +115,16 @@ mod tests {
         assert_eq!(kind_of(Path::new("a/b.ts"), false), "TS");
         assert_eq!(kind_of(Path::new("Makefile"), false), "文件");
     }
+
+    #[test]
+    fn sibling_prefix_is_not_under() {
+        let tmp = std::env::temp_dir().join(format!("aw-fs-{}", std::process::id()));
+        let root = tmp.join("app");
+        let sibling = tmp.join("app2");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&sibling).unwrap();
+        assert!(is_under(&root, &root));
+        assert!(!is_under(&sibling, &root));
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
 }

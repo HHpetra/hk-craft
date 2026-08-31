@@ -6,24 +6,48 @@ import { Toast } from "./components/ui/Toast";
 import { applyRegisteredXtermTheme } from "./components/terminal/TerminalPane";
 import { useOsFileDrop } from "./hooks/useOsFileDrop";
 import { usePtyStatusListener } from "./hooks/usePtyStatusListener";
+import { useAgentSessionCapture } from "./hooks/useAgentSessionCapture";
 import { applyDocumentTheme } from "./lib/theme";
+import {
+  applyRegisteredTerminalFont,
+  discoverLocalNerdFonts,
+  ensurePtyOutputListener,
+  setPreferredTerminalFont,
+} from "./lib/termRegistry";
 import { useWorkspace } from "./store/workspace";
 
 export default function App() {
   const bootstrap = useWorkspace((s) => s.bootstrap);
   const loading = useWorkspace((s) => s.loading);
   const theme = useWorkspace((s) => s.config?.settings.theme);
+  const terminalFont = useWorkspace((s) => s.config?.settings.terminal_font);
   usePtyStatusListener();
   useOsFileDrop();
+  useAgentSessionCapture();
 
   useEffect(() => {
-    void bootstrap();
+    let cancelled = false;
+    void ensurePtyOutputListener()
+      .then(() => {
+        if (!cancelled) return bootstrap();
+      })
+      .catch(() => {
+        if (!cancelled) return bootstrap();
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [bootstrap]);
 
   useEffect(() => {
     applyDocumentTheme(theme);
     applyRegisteredXtermTheme(theme ?? "dark");
   }, [theme]);
+
+  useEffect(() => {
+    setPreferredTerminalFont(terminalFont);
+    void discoverLocalNerdFonts().then(() => applyRegisteredTerminalFont(terminalFont));
+  }, [terminalFont]);
 
   if (loading) {
     return (
