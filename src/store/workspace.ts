@@ -36,6 +36,7 @@ interface WorkspaceState {
   setProjectDialogOpen: (open: boolean) => void;
   selectProject: (id: string) => Promise<void>;
   addProject: (name: string, path: string, agentPreset: string) => Promise<void>;
+  closeProject: (id: string) => Promise<void>;
   removeProject: (id: string) => Promise<void>;
   updateProjectPreset: (id: string, agentPreset: string) => Promise<void>;
   spawnForProject: (project: Project) => Promise<void>;
@@ -65,6 +66,10 @@ const defaultConfig = (): AppConfig => ({
 function asRatio(values: number[] | undefined): [number, number, number] {
   if (!values || values.length !== 3) return [30, 40, 30];
   return [values[0], values[1], values[2]];
+}
+
+function isLive(status: SessionStatus | undefined) {
+  return status === "running" || status === "waiting";
 }
 
 let splitTimer: ReturnType<typeof setTimeout> | null = null;
@@ -110,10 +115,10 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   bootstrap: async () => {
     try {
       const config = await loadConfig();
+      const savedActive = config.settings.active_project_id;
       const active =
-        config.settings.active_project_id &&
-        config.projects.some((p) => p.id === config.settings.active_project_id)
-          ? config.settings.active_project_id
+        savedActive && config.projects.some((p) => p.id === savedActive)
+          ? savedActive
           : (config.projects[0]?.id ?? null);
       const project = config.projects.find((p) => p.id === active) ?? null;
       set({
@@ -126,6 +131,13 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
       applyDocumentTheme(config.settings.theme);
       setPreferredTerminalFont(config.settings.terminal_font);
       void discoverLocalNerdFonts().then(() => applyRegisteredTerminalFont());
+      if (active !== savedActive) {
+        const latest = get().config ?? config;
+        await get().persist({
+          ...latest,
+          settings: { ...latest.settings, active_project_id: active },
+        });
+      }
       if (project) {
         await get().spawnForProject(project);
       }
@@ -155,6 +167,9 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     if (!config) return;
     const project = config.projects.find((p) => p.id === id);
     if (!project) return;
+    if (get().activeProjectId === id && get().openedProjectIds.includes(id)) {
+      return;
+    }
     const prevActive = get().activeProjectId;
     const prevOpened = get().openedProjectIds;
     set((s) => ({
@@ -208,6 +223,30 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     await get().spawnForProject(project);
   },
 
+  closeProject: async (id) => {
+    const agentId = sessionId(id, "agent");
+    const runnerId = sessionId(id, "runner");
+    set((s) => {
+      const sessionStatus = { ...s.sessionStatus, [agentId]: "idle" as const, [runnerId]: "idle" as const };
+      return {
+        openedProjectIds: s.openedProjectIds.filter((pid) => pid !== id),
+        sessionStatus,
+      };
+    });
+    try {
+      await ptyKill(agentId);
+    } catch {
+      // session may already be gone
+    }
+    try {
+      await ptyKill(runnerId);
+    } catch {
+      // session may already be gone
+    }
+    disposeTerminal(agentId);
+    disposeTerminal(runnerId);
+  },
+
   removeProject: async (id) => {
     const { config } = get();
     if (!config) return;
@@ -221,21 +260,17 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     };
     const saved = await get().persist(next);
     if (!saved) return;
-    try {
-      await ptyKill(sessionId(id, "agent"));
-      await ptyKill(sessionId(id, "runner"));
-    } catch {
-      // session may already be gone
-    }
-    disposeTerminal(sessionId(id, "agent"));
-    disposeTerminal(sessionId(id, "runner"));
-    set((s) => ({
-      activeProjectId: nextActive,
-      openedProjectIds: s.openedProjectIds.filter((pid) => pid !== id),
-    }));
+    await get().closeProject(id);
+    set({ activeProjectId: nextActive });
     if (wasActive && nextActive) {
       const project = projects.find((p) => p.id === nextActive);
-      if (project) await get().spawnForProject(project);
+      if (!project) return;
+      set((s) => ({
+        openedProjectIds: s.openedProjectIds.includes(nextActive)
+          ? s.openedProjectIds
+          : [...s.openedProjectIds, nextActive],
+      }));
+      await get().spawnForProject(project);
     }
   },
 
@@ -260,14 +295,17 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
       config?.settings.resume_on_start !== false
         ? resumeArgsForSession(command, project.agent_session_id)
         : [];
-    try {
-      const result = await ptySpawn({ sessionId: runnerId, cwd: project.path, command: "" });
-      setSessionGeneration(runnerId, result.generation);
-      if (!result.reused) setSessionStatus(runnerId, "running");
-    } catch (err) {
-      setSessionStatus(runnerId, "error");
-      setNotice(`Runner 启动失败：${String(err)}`);
+    if (!isLive(get().sessionStatus[runnerId])) {
+      try {
+        const result = await ptySpawn({ sessionId: runnerId, cwd: project.path, command: "" });
+        setSessionGeneration(runnerId, result.generation);
+        if (!result.reused) setSessionStatus(runnerId, "running");
+      } catch (err) {
+        setSessionStatus(runnerId, "error");
+        setNotice(`Runner 启动失败：${String(err)}`);
+      }
     }
+    if (isLive(get().sessionStatus[agentId])) return;
     try {
       const result = await ptySpawn({
         sessionId: agentId,
@@ -418,6 +456,13 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
         // discovery is best-effort
       }
     }
+    const latest = get().config;
+    const activeProjectId = get().activeProjectId;
+    if (!latest || latest.settings.active_project_id === activeProjectId) return;
+    await get().persist({
+      ...latest,
+      settings: { ...latest.settings, active_project_id: activeProjectId },
+    });
   },
 
   setTheme: async (theme) => {

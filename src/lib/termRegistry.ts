@@ -165,6 +165,7 @@ function bindOscColorQuery(sessionId: string, term: Terminal, theme: XtermTheme)
 const registry = new Map<string, RegistryEntry>();
 const generations = new Map<string, number>();
 const pending = new Map<string, string[]>();
+const closedSessions = new Set<string>();
 const MAX_PENDING_CHARS = 256_000;
 
 let outputListenPromise: Promise<void> | null = null;
@@ -215,7 +216,7 @@ export function ensurePtyOutputListener(): Promise<void> {
     const entry = registry.get(session_id);
     if (entry) {
       entry.term.write(data);
-    } else {
+    } else if (!closedSessions.has(session_id)) {
       bufferOutput(session_id, data);
     }
   })
@@ -229,6 +230,7 @@ export function ensurePtyOutputListener(): Promise<void> {
 
 export function getOrCreateTerminal(sessionId: string): RegistryEntry {
   ensurePtyOutputListener();
+  closedSessions.delete(sessionId);
   const existing = registry.get(sessionId);
   if (existing) return existing;
 
@@ -296,6 +298,7 @@ export function clearTerminal(sessionId: string) {
 }
 
 export function disposeTerminal(sessionId: string) {
+  closedSessions.add(sessionId);
   pending.delete(sessionId);
   generations.delete(sessionId);
   const entry = registry.get(sessionId);

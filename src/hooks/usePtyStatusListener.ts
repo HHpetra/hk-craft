@@ -37,6 +37,16 @@ function kindFromSession(sessionId: string): "agent" | "runner" {
   return sessionId.endsWith(":runner") ? "runner" : "agent";
 }
 
+function projectIdFromSession(sessionId: string) {
+  const sep = sessionId.lastIndexOf(":");
+  return sep === -1 ? sessionId : sessionId.slice(0, sep);
+}
+
+function isOpenedSession(sessionId: string) {
+  const projectId = projectIdFromSession(sessionId);
+  return useWorkspace.getState().openedProjectIds.includes(projectId);
+}
+
 function projectNameFor(sessionId: string) {
   const { config } = useWorkspace.getState();
   const project = config?.projects.find((p) => sessionId.startsWith(`${p.id}:`));
@@ -75,6 +85,7 @@ export function usePtyStatusListener() {
 
     void listen<PtyOutput>("pty-output", (event) => {
       const id = event.payload.session_id;
+      if (!isOpenedSession(id)) return;
       if (!isCurrentGeneration(id, event.payload.generation ?? 0)) return;
       const track = getTrack(id);
       track.lastOutput = Date.now();
@@ -92,6 +103,7 @@ export function usePtyStatusListener() {
 
     void listen<PtyExit>("pty-exit", (event) => {
       const id = event.payload.session_id;
+      if (!isOpenedSession(id)) return;
       if (!isCurrentGeneration(id, event.payload.generation ?? 0)) return;
       const track = getTrack(id);
       clearTimer(track);

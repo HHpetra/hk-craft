@@ -1,4 +1,4 @@
-import { Folder, Plus, Settings, X } from "lucide-react";
+import { CircleStop, Folder, Plus, Settings, X } from "lucide-react";
 import { cn, sessionId } from "../../lib/format";
 import { projectBadge } from "../../lib/status";
 import { useWorkspace } from "../../store/workspace";
@@ -7,8 +7,10 @@ import { StatusDot } from "../ui/StatusDot";
 export function ProjectSidebar() {
   const projects = useWorkspace((s) => s.config?.projects ?? []);
   const activeId = useWorkspace((s) => s.activeProjectId);
+  const openedProjectIds = useWorkspace((s) => s.openedProjectIds);
   const status = useWorkspace((s) => s.sessionStatus);
   const selectProject = useWorkspace((s) => s.selectProject);
+  const closeProject = useWorkspace((s) => s.closeProject);
   const removeProject = useWorkspace((s) => s.removeProject);
   const setProjectDialogOpen = useWorkspace((s) => s.setProjectDialogOpen);
   const setSettingsOpen = useWorkspace((s) => s.setSettingsOpen);
@@ -28,6 +30,7 @@ export function ProjectSidebar() {
             status[sessionId(project.id, "runner")],
           );
           const active = project.id === activeId;
+          const opened = openedProjectIds.includes(project.id);
           return (
             <div
               key={project.id}
@@ -47,11 +50,27 @@ export function ProjectSidebar() {
                 </span>
                 <StatusDot status={badge} className="ml-auto" />
               </button>
+              {opened && (
+                <button
+                  type="button"
+                  className="hidden shrink-0 text-ink-subtle hover:text-ink group-hover:block"
+                  title="关闭会话"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void closeProject(project.id);
+                  }}
+                >
+                  <CircleStop size={13} />
+                </button>
+              )}
               <button
                 type="button"
-                className="hidden text-ink-subtle hover:text-ink group-hover:block"
+                className="hidden shrink-0 text-ink-subtle hover:text-ink group-hover:block"
                 title="移除项目"
-                onClick={() => void removeProject(project.id)}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void removeProject(project.id);
+                }}
               >
                 <X size={13} />
               </button>
