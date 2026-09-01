@@ -88,6 +88,27 @@ fn list_dir(path: &Path, roots: &[PathBuf]) -> AppResult<Vec<FileEntry>> {
     Ok(entries)
 }
 
+fn open_file(path: &Path, roots: &[PathBuf]) -> AppResult<()> {
+    if !path.exists() {
+        return Err(AppError::msg(format!("路径不存在：{}", display_path(path))));
+    }
+    if path.is_dir() {
+        return Err(AppError::msg("请双击文件以用默认程序打开"));
+    }
+    if !is_allowed(path, roots) {
+        return Err(AppError::msg("路径不在已纳管的项目或书签目录内"));
+    }
+    open::that_detached(path).map_err(|e| AppError::msg(format!("无法打开文件：{e}")))
+}
+
+#[tauri::command]
+pub async fn fs_open(state: State<'_, AppState>, path: String) -> AppResult<()> {
+    let roots = state.config.lock().expect("config lock").allowed_roots();
+    tauri::async_runtime::spawn_blocking(move || open_file(Path::new(&path), &roots))
+        .await
+        .map_err(|e| AppError::msg(e.to_string()))?
+}
+
 #[tauri::command]
 pub async fn fs_list(state: State<'_, AppState>, path: String) -> AppResult<Vec<FileEntry>> {
     let roots = state
@@ -125,6 +146,28 @@ mod tests {
         std::fs::create_dir_all(&sibling).unwrap();
         assert!(is_under(&root, &root));
         assert!(!is_under(&sibling, &root));
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn open_file_rejects_directory_and_outside_root() {
+        let tmp = std::env::temp_dir().join(format!("aw-open-{}", std::process::id()));
+        let root = tmp.join("app");
+        let outside = tmp.join("other.txt");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(&outside, "x").unwrap();
+        let dir_err = open_file(&root, std::slice::from_ref(&root))
+            .unwrap_err()
+            .to_string();
+        assert!(dir_err.contains("文件"), "{dir_err}");
+        let outside_err = open_file(&outside, std::slice::from_ref(&root))
+            .unwrap_err()
+            .to_string();
+        assert!(outside_err.contains("纳管"), "{outside_err}");
+        let missing = open_file(&root.join("nope.txt"), std::slice::from_ref(&root))
+            .unwrap_err()
+            .to_string();
+        assert!(missing.contains("不存在"), "{missing}");
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }

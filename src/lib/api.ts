@@ -13,6 +13,10 @@ export function fsList(path: string) {
   return invoke<FileEntry[]>("fs_list", { path });
 }
 
+export function fsOpen(path: string) {
+  return invoke<void>("fs_open", { path });
+}
+
 export function checkDir(path: string) {
   return invoke<boolean>("check_dir", { path });
 }

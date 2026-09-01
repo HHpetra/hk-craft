@@ -44,6 +44,7 @@ pub fn run() {
             config::load_config,
             config::save_config,
             fs::fs_list,
+            fs::fs_open,
             fs::check_dir,
             pty::pty_spawn,
             pty::pty_write,

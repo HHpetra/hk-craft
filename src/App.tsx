@@ -8,6 +8,7 @@ import { useOsFileDrop } from "./hooks/useOsFileDrop";
 import { usePtyStatusListener } from "./hooks/usePtyStatusListener";
 import { useAgentSessionCapture } from "./hooks/useAgentSessionCapture";
 import { applyDocumentTheme } from "./lib/theme";
+import { usePathDropListeners } from "./lib/dnd";
 import {
   applyRegisteredTerminalFont,
   discoverLocalNerdFonts,
@@ -23,6 +24,7 @@ export default function App() {
   const terminalFont = useWorkspace((s) => s.config?.settings.terminal_font);
   usePtyStatusListener();
   useOsFileDrop();
+  usePathDropListeners();
   useAgentSessionCapture();
 
   useEffect(() => {

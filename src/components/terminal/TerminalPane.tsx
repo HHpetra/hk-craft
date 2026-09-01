@@ -1,7 +1,5 @@
 import { useEffect, useRef } from "react";
-import type { DragEvent } from "react";
-import { ptyWrite } from "../../lib/api";
-import { cn, formatAgentInject, formatRunnerInject } from "../../lib/format";
+import { cn } from "../../lib/format";
 import {
   fitAndResize,
   getOrCreateTerminal,
@@ -19,11 +17,6 @@ interface TerminalPaneProps {
 
 export function TerminalPane({ sessionId, kind, interactive }: TerminalPaneProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const prefix = useWorkspace((s) => {
-    const project = s.config?.projects.find((p) => sessionId.startsWith(`${p.id}:`));
-    const preset = s.config?.agent_presets.find((p) => p.id === project?.agent_preset);
-    return preset?.drag_prefix ?? "@";
-  });
   const status = useWorkspace((s) => s.sessionStatus[sessionId] ?? "idle");
   const restartSession = useWorkspace((s) => s.restartSession);
 
@@ -45,28 +38,10 @@ export function TerminalPane({ sessionId, kind, interactive }: TerminalPaneProps
     };
   }, [sessionId, interactive]);
 
-  function onDrop(event: DragEvent) {
-    event.preventDefault();
-    const path =
-      event.dataTransfer.getData("application/x-workbench-path") ||
-      event.dataTransfer.getData("text/plain");
-    if (!path) return;
-    const text =
-      kind === "agent" ? formatAgentInject(path, prefix) : formatRunnerInject(path);
-    void ptyWrite(sessionId, text).catch(() => undefined);
-  }
-
   const projectId = sessionId.split(":")[0];
 
   return (
-    <div
-      className={cn("relative h-full w-full", !interactive && "pointer-events-none")}
-      onDragOver={(e) => {
-        e.preventDefault();
-        e.dataTransfer.dropEffect = "copy";
-      }}
-      onDrop={onDrop}
-    >
+    <div className={cn("relative h-full w-full", !interactive && "pointer-events-none")}>
       <div ref={containerRef} className="h-full w-full" />
       {(status === "exited" || status === "error") && (
         <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/55">

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Folder, File as FileIcon, LayoutGrid, List, Search } from "lucide-react";
 import type { DragEvent } from "react";
-import { fsList } from "../../lib/api";
+import { fsList, fsOpen } from "../../lib/api";
+import { beginPathDrag } from "../../lib/dnd";
 import { breadcrumbParts, cn, formatSize, formatTime, pathsEqual } from "../../lib/format";
 import type { Bookmark, ExplorerView, FileEntry } from "../../types";
 import { useActiveProject, useWorkspace } from "../../store/workspace";
@@ -12,6 +13,7 @@ function startDrag(event: DragEvent, path: string) {
   event.dataTransfer.setData("application/x-workbench-path", path);
   event.dataTransfer.setData("text/plain", path);
   event.dataTransfer.effectAllowed = "copy";
+  beginPathDrag([path]);
 }
 
 export function FileExplorer() {
@@ -21,6 +23,7 @@ export function FileExplorer() {
     ? "icons"
     : "list") as ExplorerView;
   const setExplorerView = useWorkspace((s) => s.setExplorerView);
+  const setNotice = useWorkspace((s) => s.setNotice);
   const [root, setRoot] = useState(project?.path ?? "");
   const [rootLabel, setRootLabel] = useState(project?.name ?? "项目根");
   const [current, setCurrent] = useState(project?.path ?? "");
@@ -102,7 +105,11 @@ export function FileExplorer() {
   }
 
   function openEntry(entry: FileEntry) {
-    if (entry.is_dir) setCurrent(entry.path);
+    if (entry.is_dir) {
+      setCurrent(entry.path);
+      return;
+    }
+    void fsOpen(entry.path).catch((err) => setNotice(String(err)));
   }
 
   if (!project) {
