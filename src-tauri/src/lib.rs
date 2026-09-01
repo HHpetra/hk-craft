@@ -2,6 +2,7 @@ mod config;
 mod error;
 mod fs;
 mod pty;
+mod runner;
 mod session;
 
 use std::path::PathBuf;
@@ -52,6 +53,7 @@ pub fn run() {
             pty::pty_kill,
             pty::pty_list,
             session::discover_agent_session,
+            runner::delete_runner_persist,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -21,6 +21,10 @@ export function checkDir(path: string) {
   return invoke<boolean>("check_dir", { path });
 }
 
+export function deleteRunnerPersist(projectId: string) {
+  return invoke<void>("delete_runner_persist", { projectId });
+}
+
 export function ptySpawn(opts: SpawnOpts) {
   return invoke<SpawnResult>("pty_spawn", {
     opts: {

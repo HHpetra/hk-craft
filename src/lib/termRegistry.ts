@@ -13,6 +13,7 @@ type RegistryEntry = {
   fit: FitAddon;
   host: HTMLDivElement;
   osc: IDisposable[];
+  fitted?: boolean;
 };
 
 const BUNDLED_NERD_FONT = "CaskaydiaCove Nerd Font Mono";
@@ -198,10 +199,57 @@ function flushPending(sessionId: string, term: Terminal) {
   for (const chunk of chunks) term.write(chunk);
 }
 
+type FittedSize = { cols: number; rows: number };
+type SessionKindKey = "agent" | "runner";
+
+const lastFittedByKind = new Map<SessionKindKey, FittedSize>();
+
+function sessionKind(sessionId: string): SessionKindKey {
+  return sessionId.endsWith(":runner") ? "runner" : "agent";
+}
+
+function rememberFittedSize(sessionId: string, cols: number, rows: number) {
+  if (cols < 2 || rows < 2) return;
+  lastFittedByKind.set(sessionKind(sessionId), { cols, rows });
+}
+
+function parseFittedSize(value: number[] | FittedSize | null | undefined): FittedSize | null {
+  if (!value) return null;
+  const cols = Array.isArray(value) ? value[0] : value.cols;
+  const rows = Array.isArray(value) ? value[1] : value.rows;
+  if (typeof cols !== "number" || typeof rows !== "number" || cols < 2 || rows < 2) return null;
+  return { cols, rows };
+}
+
+export function lastFittedSize(sessionId: string): FittedSize | null {
+  return lastFittedByKind.get(sessionKind(sessionId)) ?? null;
+}
+
+export function hydrateLastFittedSizes(sizes: {
+  agent?: number[] | FittedSize | null;
+  runner?: number[] | FittedSize | null;
+}) {
+  const agent = parseFittedSize(sizes.agent);
+  if (agent) lastFittedByKind.set("agent", agent);
+  const runner = parseFittedSize(sizes.runner);
+  if (runner) lastFittedByKind.set("runner", runner);
+}
+
+export function peekLastFittedSizes(): { agent?: [number, number]; runner?: [number, number] } {
+  const agent = lastFittedByKind.get("agent");
+  const runner = lastFittedByKind.get("runner");
+  return {
+    ...(agent ? { agent: [agent.cols, agent.rows] as [number, number] } : {}),
+    ...(runner ? { runner: [runner.cols, runner.rows] as [number, number] } : {}),
+  };
+}
+
 export function isCurrentGeneration(sessionId: string, generation: number) {
   const current = generations.get(sessionId);
   if (current === undefined || generation === 0) return true;
-  return generation === current;
+  if (generation < current) return false;
+  if (generation > current) generations.set(sessionId, generation);
+  return true;
 }
 
 export function setSessionGeneration(sessionId: string, generation: number) {
@@ -228,12 +276,8 @@ export function ensurePtyOutputListener(): Promise<void> {
   return outputListenPromise;
 }
 
-export function getOrCreateTerminal(sessionId: string): RegistryEntry {
+function buildTerminal(sessionId: string): RegistryEntry {
   ensurePtyOutputListener();
-  closedSessions.delete(sessionId);
-  const existing = registry.get(sessionId);
-  if (existing) return existing;
-
   const theme = xtermThemes[normalizeTheme(document.documentElement.dataset.theme)];
   const term = new Terminal({
     cursorBlink: true,
@@ -241,7 +285,6 @@ export function getOrCreateTerminal(sessionId: string): RegistryEntry {
     fontFamily: terminalFontFamily(),
     theme,
     scrollback: 5000,
-    allowProposedApi: true,
     windowsMode: navigator.userAgent.includes("Windows"),
   });
   const fit = new FitAddon();
@@ -261,16 +304,26 @@ export function getOrCreateTerminal(sessionId: string): RegistryEntry {
   host.style.boxSizing = "border-box";
   host.style.overflow = "hidden";
   const osc = bindOscColorQuery(sessionId, term, theme);
-  term.open(host);
-  refreshWhenFontsReady(term);
-
   term.onData((data) => {
     void ptyWrite(sessionId, data).catch(() => undefined);
   });
 
-  const entry: RegistryEntry = { sessionId, term, fit, host, osc };
-  registry.set(sessionId, entry);
-  flushPending(sessionId, term);
+  return { sessionId, term, fit, host, osc };
+}
+
+function openAndRegister(entry: RegistryEntry) {
+  entry.term.open(entry.host);
+  refreshWhenFontsReady(entry.term);
+  registry.set(entry.sessionId, entry);
+  flushPending(entry.sessionId, entry.term);
+}
+
+export function getOrCreateTerminal(sessionId: string): RegistryEntry {
+  closedSessions.delete(sessionId);
+  const existing = registry.get(sessionId);
+  if (existing) return existing;
+  const entry = buildTerminal(sessionId);
+  openAndRegister(entry);
   return entry;
 }
 
@@ -286,8 +339,39 @@ export function applyRegisteredXtermTheme(theme: string) {
 export function fitAndResize(sessionId: string, entry: RegistryEntry) {
   const dims = entry.fit.proposeDimensions();
   if (!dims || dims.cols < 2 || dims.rows < 2) return;
+  entry.fitted = true;
+  // only a real size change may reach the pty: a rows-growth makes ConPTY
+  // repaint the whole viewport as an erase-line+CRLF flood
+  if (dims.cols === entry.term.cols && dims.rows === entry.term.rows) {
+    rememberFittedSize(sessionId, dims.cols, dims.rows);
+    return;
+  }
   entry.fit.fit();
+  rememberFittedSize(sessionId, entry.term.cols, entry.term.rows);
   void ptyResize(sessionId, entry.term.cols, entry.term.rows).catch(() => undefined);
+}
+
+// The pane size a session should be spawned with; null until the pane has
+// completed its first fit, so callers can wait for a real measurement.
+export function terminalSize(sessionId: string) {
+  const entry = registry.get(sessionId);
+  if (!entry?.fitted) return null;
+  return { cols: entry.term.cols, rows: entry.term.rows };
+}
+
+export function waitTerminalSize(sessionId: string, timeoutMs = 800) {
+  return new Promise<{ cols: number; rows: number } | null>((resolve) => {
+    const started = Date.now();
+    const tick = () => {
+      const size = terminalSize(sessionId);
+      if (size || Date.now() - started >= timeoutMs) {
+        resolve(size);
+        return;
+      }
+      setTimeout(tick, 50);
+    };
+    tick();
+  });
 }
 
 export function clearTerminal(sessionId: string) {

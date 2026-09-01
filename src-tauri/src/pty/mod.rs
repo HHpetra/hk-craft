@@ -179,13 +179,22 @@ impl PtyManager {
             pixel_height: 0,
         })?;
 
-        let mut cmd = build_command(&opts.command, &opts.args);
+        let history = crate::runner::history_path_for_session(&opts.session_id)
+            .ok()
+            .flatten();
+        let mut cmd = build_command(&opts.command, &opts.args, history.as_deref());
         cmd.cwd(&opts.cwd);
         apply_user_shell_env(&mut cmd);
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
         cmd.env("PYTHONIOENCODING", "utf-8");
         apply_color_theme_env(&mut cmd, theme);
+        #[cfg(not(windows))]
+        if let Some(path) = history.as_ref() {
+            cmd.env("HISTFILE", path);
+            cmd.env("HISTSIZE", "5000");
+            cmd.env("HISTFILESIZE", "5000");
+        }
 
         let child = pair.slave.spawn_command(cmd)?;
         drop(pair.slave);
@@ -454,7 +463,19 @@ fn decode_gbk_available(buffer: &mut Vec<u8>) -> String {
     decoded
 }
 
-fn default_shell() -> (String, Vec<String>) {
+#[cfg_attr(not(windows), allow(dead_code))]
+fn powershell_startup_command(history_path: Option<&Path>) -> String {
+    let mut cmd = String::from(
+        "[Console]::InputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); $OutputEncoding = [Console]::OutputEncoding; chcp 65001 | Out-Null",
+    );
+    if let Some(path) = history_path {
+        cmd.push_str("; Set-PSReadLineOption -HistorySavePath ");
+        cmd.push_str(&crate::runner::quote_ps_single(&path.to_string_lossy()));
+    }
+    cmd
+}
+
+fn default_shell(history_path: Option<&Path>) -> (String, Vec<String>) {
     #[cfg(windows)]
     {
         (
@@ -463,12 +484,13 @@ fn default_shell() -> (String, Vec<String>) {
                 "-NoLogo".into(),
                 "-NoExit".into(),
                 "-Command".into(),
-                "[Console]::InputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); $OutputEncoding = [Console]::OutputEncoding; chcp 65001 | Out-Null".into(),
+                powershell_startup_command(history_path),
             ],
         )
     }
     #[cfg(not(windows))]
     {
+        let _ = history_path;
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".into());
         (shell, Vec::new())
     }
@@ -485,9 +507,9 @@ fn quote_cmd_arg(value: &str) -> String {
     format!("\"{}\"", value.replace('"', "\\\""))
 }
 
-fn build_command(command: &str, args: &[String]) -> CommandBuilder {
+fn build_command(command: &str, args: &[String], history_path: Option<&Path>) -> CommandBuilder {
     let (program, program_args) = if command.trim().is_empty() {
-        default_shell()
+        default_shell(history_path)
     } else {
         (command.to_string(), args.to_vec())
     };
@@ -621,5 +643,15 @@ mod tests {
         assert!(!lower.contains(r"miniconda3\bin"), "{merged}");
         assert!(lower.contains(r"c:\windows"));
         assert!(lower.contains(r"c:\windows\system32"));
+    }
+
+    #[test]
+    fn powershell_startup_includes_history_only_when_set() {
+        let plain = powershell_startup_command(None);
+        assert!(plain.contains("chcp 65001"));
+        assert!(!plain.contains("HistorySavePath"));
+        let with_hist = powershell_startup_command(Some(Path::new(r"C:\Users\me\.agent-workbench\runners\p1\history")));
+        assert!(with_hist.contains("Set-PSReadLineOption -HistorySavePath"));
+        assert!(with_hist.contains(r"'C:\Users\me\.agent-workbench\runners\p1\history'"));
     }
 }

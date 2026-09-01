@@ -15,6 +15,8 @@ export interface Settings {
   explorer_view: string;
   resume_on_start: boolean;
   terminal_font: string;
+  last_agent_size?: [number, number];
+  last_runner_size?: [number, number];
 }
 
 export interface AgentPreset {

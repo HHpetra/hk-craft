@@ -3,6 +3,7 @@ import { cn } from "../../lib/format";
 import {
   fitAndResize,
   getOrCreateTerminal,
+  type RegistryEntry,
 } from "../../lib/termRegistry";
 import type { SessionKind } from "../../types";
 import { useWorkspace } from "../../store/workspace";
@@ -23,20 +24,29 @@ export function TerminalPane({ sessionId, kind, interactive }: TerminalPaneProps
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
-    const entry = getOrCreateTerminal(sessionId);
-    if (entry.host.parentElement !== container) {
-      container.replaceChildren(entry.host);
-    }
-    const ro = new ResizeObserver(() => {
-      if (!interactive) return;
+    let cancelled = false;
+    let ro: ResizeObserver | null = null;
+
+    function mount() {
+      const entry: RegistryEntry = getOrCreateTerminal(sessionId);
+      if (cancelled || !container) return;
+      if (entry.host.parentElement !== container) {
+        container.replaceChildren(entry.host);
+      }
+      ro = new ResizeObserver(() => {
+        if (!interactive) return;
+        requestAnimationFrame(() => fitAndResize(sessionId, entry));
+      });
+      ro.observe(container);
       requestAnimationFrame(() => fitAndResize(sessionId, entry));
-    });
-    ro.observe(container);
-    requestAnimationFrame(() => fitAndResize(sessionId, entry));
+    }
+
+    mount();
     return () => {
-      ro.disconnect();
+      cancelled = true;
+      ro?.disconnect();
     };
-  }, [sessionId, interactive]);
+  }, [sessionId, kind, interactive]);
 
   const projectId = sessionId.split(":")[0];
 

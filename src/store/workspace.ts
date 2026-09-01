@@ -1,6 +1,6 @@
 import { create } from "zustand";
-import type { AppConfig, ExplorerView, Project, SessionStatus, ViewMode } from "../types";
-import { checkDir, discoverAgentSession, loadConfig, ptyKill, ptySpawn, saveConfig } from "../lib/api";
+import type { AppConfig, ExplorerView, Project, SessionStatus, SpawnOpts, SpawnResult, ViewMode } from "../types";
+import { checkDir, deleteRunnerPersist, discoverAgentSession, loadConfig, ptyKill, ptySpawn, saveConfig } from "../lib/api";
 import { pathsEqual, resumeArgsForSession, sessionId } from "../lib/format";
 import { applyDocumentTheme, normalizeTheme } from "../lib/theme";
 import {
@@ -8,8 +8,13 @@ import {
   clearTerminal,
   discoverLocalNerdFonts,
   disposeTerminal,
+  hydrateLastFittedSizes,
+  lastFittedSize,
+  peekLastFittedSizes,
   setPreferredTerminalFont,
   setSessionGeneration,
+  terminalSize,
+  waitTerminalSize,
 } from "../lib/termRegistry";
 
 type SessionMap = Record<string, SessionStatus>;
@@ -72,6 +77,20 @@ function isLive(status: SessionStatus | undefined) {
   return status === "running" || status === "waiting";
 }
 
+// The pty must be born at the pane's real size: spawning at the 80x24 default
+// and resizing later makes ConPTY repaint the whole viewport as an
+// erase-line+CRLF flood, which scrambles the screen. Wait briefly for the
+// pane's first fit, then spawn with those dimensions.
+async function spawnPty(opts: SpawnOpts): Promise<SpawnResult> {
+  const size =
+    terminalSize(opts.sessionId) ??
+    (await waitTerminalSize(opts.sessionId)) ??
+    lastFittedSize(opts.sessionId);
+  const result = await ptySpawn(size ? { ...opts, cols: size.cols, rows: size.rows } : opts);
+  setSessionGeneration(opts.sessionId, result.generation);
+  return result;
+}
+
 let splitTimer: ReturnType<typeof setTimeout> | null = null;
 
 export const useWorkspace = create<WorkspaceState>((set, get) => ({
@@ -130,6 +149,10 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
       });
       applyDocumentTheme(config.settings.theme);
       setPreferredTerminalFont(config.settings.terminal_font);
+      hydrateLastFittedSizes({
+        agent: config.settings.last_agent_size,
+        runner: config.settings.last_runner_size,
+      });
       void discoverLocalNerdFonts().then(() => applyRegisteredTerminalFont());
       if (active !== savedActive) {
         const latest = get().config ?? config;
@@ -152,7 +175,15 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
 
   persist: async (next) => {
     try {
-      const saved = await saveConfig(next);
+      const sizes = peekLastFittedSizes();
+      const saved = await saveConfig({
+        ...next,
+        settings: {
+          ...next.settings,
+          ...(sizes.agent ? { last_agent_size: sizes.agent } : {}),
+          ...(sizes.runner ? { last_runner_size: sizes.runner } : {}),
+        },
+      });
       set({ config: saved });
       applyDocumentTheme(saved.settings.theme);
       return true;
@@ -261,6 +292,11 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     const saved = await get().persist(next);
     if (!saved) return;
     await get().closeProject(id);
+    try {
+      await deleteRunnerPersist(id);
+    } catch {
+      // leftover files are non-fatal
+    }
     set({ activeProjectId: nextActive });
     if (wasActive && nextActive) {
       const project = projects.find((p) => p.id === nextActive);
@@ -297,8 +333,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
         : [];
     if (!isLive(get().sessionStatus[runnerId])) {
       try {
-        const result = await ptySpawn({ sessionId: runnerId, cwd: project.path, command: "" });
-        setSessionGeneration(runnerId, result.generation);
+        const result = await spawnPty({ sessionId: runnerId, cwd: project.path, command: "" });
         if (!result.reused) setSessionStatus(runnerId, "running");
       } catch (err) {
         setSessionStatus(runnerId, "error");
@@ -307,13 +342,12 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     }
     if (isLive(get().sessionStatus[agentId])) return;
     try {
-      const result = await ptySpawn({
+      const result = await spawnPty({
         sessionId: agentId,
         cwd: project.path,
         command,
         args: resume,
       });
-      setSessionGeneration(agentId, result.generation);
       if (!result.reused) setSessionStatus(agentId, "running");
       if (!project.agent_seen) {
         const latest = get().config;
@@ -329,13 +363,12 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     } catch (err) {
       if (resume.length > 0) {
         try {
-          const result = await ptySpawn({
+          const result = await spawnPty({
             sessionId: agentId,
             cwd: project.path,
             command,
             args: [],
           });
-          setSessionGeneration(agentId, result.generation);
           if (!result.reused) setSessionStatus(agentId, "running");
           const latest = get().config;
           if (latest) {
@@ -372,8 +405,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     get().setSessionStatus(id, "idle");
     if (kind === "runner") {
       try {
-        const result = await ptySpawn({ sessionId: id, cwd: project.path, command: "" });
-        setSessionGeneration(id, result.generation);
+        await spawnPty({ sessionId: id, cwd: project.path, command: "" });
         get().setSessionStatus(id, "running");
       } catch (err) {
         get().setSessionStatus(id, "error");
@@ -388,24 +420,22 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
         ? resumeArgsForSession(command, project.agent_session_id)
         : [];
     try {
-      const result = await ptySpawn({
+      await spawnPty({
         sessionId: id,
         cwd: project.path,
         command,
         args: resume,
       });
-      setSessionGeneration(id, result.generation);
       get().setSessionStatus(id, "running");
     } catch (err) {
       if (resume.length > 0) {
         try {
-          const result = await ptySpawn({
+          await spawnPty({
             sessionId: id,
             cwd: project.path,
             command,
             args: [],
           });
-          setSessionGeneration(id, result.generation);
           get().setSessionStatus(id, "running");
           const latest = get().config;
           if (latest) {

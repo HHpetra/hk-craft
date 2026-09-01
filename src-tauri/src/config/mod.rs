@@ -33,6 +33,10 @@ pub struct Settings {
     pub resume_on_start: bool,
     #[serde(default)]
     pub terminal_font: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub last_agent_size: Vec<u16>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub last_runner_size: Vec<u16>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -84,6 +88,8 @@ impl Default for Settings {
             explorer_view: default_explorer_view(),
             resume_on_start: true,
             terminal_font: String::new(),
+            last_agent_size: Vec::new(),
+            last_runner_size: Vec::new(),
         }
     }
 }
