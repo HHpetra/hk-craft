@@ -101,6 +101,27 @@ fn open_file(path: &Path, roots: &[PathBuf]) -> AppResult<()> {
     open::that_detached(path).map_err(|e| AppError::msg(format!("无法打开文件：{e}")))
 }
 
+fn is_allowed_github_url(url: &str) -> bool {
+    let url = url.trim();
+    if url.is_empty() || url.chars().any(char::is_whitespace) {
+        return false;
+    }
+    let Some(rest) = url.strip_prefix("https://") else {
+        return false;
+    };
+    let host = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let host = host.split(':').next().unwrap_or("");
+    host.eq_ignore_ascii_case("github.com") || host.eq_ignore_ascii_case("www.github.com")
+}
+
+#[tauri::command]
+pub fn open_url(url: String) -> AppResult<()> {
+    if !is_allowed_github_url(&url) {
+        return Err(AppError::msg("仅允许打开 GitHub 链接"));
+    }
+    open::that_detached(url.trim()).map_err(|e| AppError::msg(format!("无法打开链接：{e}")))
+}
+
 #[tauri::command]
 pub async fn fs_open(state: State<'_, AppState>, path: String) -> AppResult<()> {
     let roots = state.config.lock().expect("config lock").allowed_roots();

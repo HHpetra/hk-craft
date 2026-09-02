@@ -18,6 +18,14 @@ export function fsOpen(path: string) {
   return invoke<void>("fs_open", { path });
 }
 
+export function openUrl(url: string) {
+  return invoke<void>("open_url", { url });
+}
+
+export function fetchLatestReleaseTag(repo: string) {
+  return invoke<string>("fetch_latest_release_tag", { repo });
+}
+
 export function checkDir(path: string) {
   return invoke<boolean>("check_dir", { path });
 }

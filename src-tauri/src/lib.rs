@@ -5,6 +5,7 @@ mod fs;
 mod pty;
 mod runner;
 mod session;
+mod update;
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -47,6 +48,7 @@ pub fn run() {
             config::save_config,
             fs::fs_list,
             fs::fs_open,
+            fs::open_url,
             fs::check_dir,
             clipboard::clipboard_read_text,
             pty::pty_spawn,
@@ -56,6 +58,7 @@ pub fn run() {
             pty::pty_list,
             session::discover_agent_session,
             runner::delete_runner_persist,
+            update::fetch_latest_release_tag,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

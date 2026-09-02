@@ -1,9 +1,18 @@
 import { useEffect, useState } from "react";
 import { FolderOpen, Plus, Trash2, X } from "lucide-react";
 import type { AgentPreset, Bookmark } from "../../types";
-import { APP_COPYRIGHT, APP_GIT_HASH, APP_NAME, APP_VERSION } from "../../lib/appInfo";
+import { openUrl } from "../../lib/api";
+import {
+  APP_COPYRIGHT,
+  APP_GIT_HASH,
+  APP_GITHUB_URL,
+  APP_NAME,
+  APP_RELEASES_URL,
+  APP_VERSION,
+} from "../../lib/appInfo";
 import { pickDirectory } from "../../lib/dialog";
 import { discoverLocalNerdFonts, listDetectedNerdFonts } from "../../lib/termRegistry";
+import { checkAppUpdate, type UpdateCheck } from "../../lib/updateCheck";
 import { normalizeTheme } from "../../lib/theme";
 import { useWorkspace } from "../../store/workspace";
 
@@ -22,9 +31,12 @@ export function SettingsDialog() {
   const [bookmarkName, setBookmarkName] = useState("");
   const [bookmarkPath, setBookmarkPath] = useState("");
   const [nerdFonts, setNerdFonts] = useState<string[]>(() => listDetectedNerdFonts());
+  const [update, setUpdate] = useState<UpdateCheck | { status: "checking" }>({ status: "checking" });
 
   useEffect(() => {
     if (!open) return;
+    setUpdate({ status: "checking" });
+    void checkAppUpdate().then(setUpdate);
     const current = useWorkspace.getState().config;
     if (!current) return;
     setPresets(current.agent_presets.map((p) => ({ ...p })));
@@ -47,6 +59,25 @@ export function SettingsDialog() {
   if (!open || !config) return null;
 
   const theme = normalizeTheme(config.settings.theme);
+
+  function openGithub(url: string) {
+    void openUrl(url).catch((err) => setNotice(String(err)));
+  }
+
+  function refreshUpdate() {
+    if (update.status === "checking") return;
+    setUpdate({ status: "checking" });
+    void checkAppUpdate(true).then(setUpdate);
+  }
+
+  const updateLabel =
+    update.status === "checking"
+      ? "检查更新…"
+      : update.status === "latest"
+        ? "已是最新"
+        : update.status === "outdated"
+          ? `有新版本 v${update.latest}`
+          : "无法检查更新";
 
   function save() {
     const current = useWorkspace.getState().config;
@@ -330,13 +361,48 @@ export function SettingsDialog() {
               保存
             </button>
           </div>
-          <footer className="mt-3 select-text text-[11px] leading-5 text-ink-subtle">
+          <footer className="mt-3 border-t border-line pt-3 select-text text-[11px] leading-5 text-ink-subtle">
             <div>
               {APP_NAME} v{APP_VERSION}
               <span className="mx-1.5">·</span>
               <span className="font-mono" title="Git commit">
                 {APP_GIT_HASH}
               </span>
+            </div>
+            <div className="flex flex-wrap items-center gap-x-1.5">
+              <span>{updateLabel}</span>
+              {update.status === "outdated" && (
+                <>
+                  <span>·</span>
+                  <button
+                    type="button"
+                    className="text-ink-muted hover:text-ink"
+                    onClick={() => openGithub(APP_RELEASES_URL)}
+                  >
+                    前往下载
+                  </button>
+                </>
+              )}
+              {update.status !== "checking" && (
+                <>
+                  <span>·</span>
+                  <button
+                    type="button"
+                    className="text-ink-muted hover:text-ink"
+                    onClick={refreshUpdate}
+                  >
+                    检查更新
+                  </button>
+                </>
+              )}
+              <span>·</span>
+              <button
+                type="button"
+                className="text-ink-muted hover:text-ink"
+                onClick={() => openGithub(APP_GITHUB_URL)}
+              >
+                GitHub
+              </button>
             </div>
             <div>{APP_COPYRIGHT}</div>
           </footer>
