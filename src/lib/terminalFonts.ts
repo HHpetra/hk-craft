@@ -1,5 +1,3 @@
-const BUNDLED_NERD_FONT = "CaskaydiaCove Nerd Font Mono";
-
 const LOCAL_NERD_CANDIDATES = [
   "Maple Mono NF CN",
   "Maple Mono NF",
@@ -60,12 +58,8 @@ function uniqueFonts(names: string[]) {
 
 export function listDetectedNerdFonts() {
   const fromQuery = queriedLocalNerdFonts.filter(isNerdFamily);
-  const fromCheck = LOCAL_NERD_CANDIDATES.filter(
-    (name) => name !== BUNDLED_NERD_FONT && fontAvailable(name),
-  );
-  return dropWeightVariants(
-    uniqueFonts([...fromQuery, ...fromCheck, ...LOCAL_NERD_CANDIDATES.filter((name) => name !== BUNDLED_NERD_FONT)]),
-  );
+  const fromCheck = LOCAL_NERD_CANDIDATES.filter(fontAvailable);
+  return dropWeightVariants(uniqueFonts([...fromQuery, ...fromCheck, ...LOCAL_NERD_CANDIDATES]));
 }
 
 export async function discoverLocalNerdFonts() {
@@ -94,8 +88,7 @@ export function terminalFontFamily(preferred = preferredTerminalFont) {
     uniqueFonts([
       ...(want ? [want] : []),
       ...queriedLocalNerdFonts.filter(isNerdFamily),
-      ...LOCAL_NERD_CANDIDATES.filter((name) => name !== BUNDLED_NERD_FONT),
-      BUNDLED_NERD_FONT,
+      ...LOCAL_NERD_CANDIDATES,
     ]),
   );
   return [
@@ -110,5 +103,5 @@ export function terminalFontFamily(preferred = preferredTerminalFont) {
 }
 
 export function primaryTerminalFont() {
-  return terminalFontFamily().split(",")[0]?.replace(/"/g, "").trim() ?? BUNDLED_NERD_FONT;
+  return terminalFontFamily().split(",")[0]?.replace(/"/g, "").trim() ?? "monospace";
 }

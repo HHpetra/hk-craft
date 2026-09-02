@@ -72,6 +72,8 @@
 ├── ai-docs/                    # 需求与设计文档
 │   └── agent-workbench-design.md
 ├── AGENTS.md                   # Agent 指南与规范 (本文件)
+├── public/                     # Vite 静态资源（打包时复制到 dist/）
+│   └── favicon.svg
 ├── src-tauri/                  # Tauri Rust 后端
 │   ├── Cargo.toml
 │   ├── tauri.conf.json
@@ -80,7 +82,12 @@
 │       ├── lib.rs
 │       ├── pty/                # PTY 会话管理与进程保活
 │       ├── fs/                 # 文件系统读取、元数据解析
-│       └── config/             # TOML 配置读写与持久化
+│       ├── config/             # TOML 配置读写与持久化
+│       ├── session.rs          # Agent session 发现
+│       ├── clipboard.rs
+│       ├── update.rs           # GitHub Releases 检查更新
+│       ├── runner.rs
+│       └── error.rs
 ├── src/                        # 前端 React 应用
 │   ├── main.tsx
 │   ├── App.tsx
@@ -91,6 +98,7 @@
 │   │   ├── terminal/           # xterm.js 终端封装与拖拽目标处理
 │   │   └── settings/           # 设置弹窗与模板管理
 │   ├── hooks/                  # PTY 通信、拖拽、快捷键 hooks
+│   ├── lib/                    # 协议、PTY 活动、面板启动、字体等纯逻辑
 │   ├── store/                  # 工作区与项目状态 (Zustand)
 │   └── types/                  # TypeScript 类型定义
 ├── package.json

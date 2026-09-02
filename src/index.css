@@ -1,13 +1,5 @@
 @import "tailwindcss";
 
-@font-face {
-  font-family: "CaskaydiaCove Nerd Font Mono";
-  src: url("/fonts/CaskaydiaCoveNerdFontMono-Regular.ttf") format("truetype");
-  font-weight: 400;
-  font-style: normal;
-  font-display: block;
-}
-
 :root,
 :root[data-theme="dark"] {
   --bg: #0c0c0e;
