@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.2.0] - 2026-09-02
+
+### Added
+- Codex CLI preset with session resume (`resume <id>`).
+- Settings page update check that opens the GitHub Releases page when a newer version exists.
+
+### Changed
+- Prefer installed system terminal fonts and remove bundled extra font assets.
+- Consolidate pane launch, Agent protocol lookup, and PTY live-status checks.
+
+### Fixed
+- Agent terminal paste, IME composition, and false “task completed” notifications.
+
 ## [0.1.0] - 2026-09-02
 
 ### Added
