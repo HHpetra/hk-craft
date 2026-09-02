@@ -85,14 +85,33 @@ select {
   font: inherit;
 }
 
-.xterm,
-.xterm-viewport,
-.xterm-screen {
+.xterm {
+  width: 100%;
   height: 100%;
+  overflow: hidden;
+  padding: 0;
 }
 
-.xterm {
-  padding: 0;
+.xterm .xterm-helpers {
+  z-index: 10;
+}
+
+.xterm .xterm-screen canvas {
+  z-index: 0;
+}
+
+.xterm .xterm-helper-textarea {
+  /* Windows IME skips opacity:0 / z-index:-5 and then appears at the window origin. */
+  z-index: 20 !important;
+  opacity: 0.01 !important;
+  color: transparent;
+  caret-color: transparent;
+  background: transparent;
+}
+
+.xterm .composition-view {
+  background: var(--bg-term);
+  color: var(--fg);
 }
 
 [data-separator] {

@@ -81,12 +81,12 @@ pnpm install
 
 ### 2. 启动桌面端调试
 ```bash
-pnpm tauri dev
+pnpm dev
 ```
 
 ### 3. 构建发布安装包
 ```bash
-pnpm tauri build
+pnpm build
 ```
 构建生成的安装包将存放于 `src-tauri/target/release/bundle/`。
 

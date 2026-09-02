@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { notePtyUserInput } from "./ptyActivity";
 import type { AppConfig, FileEntry, SpawnOpts, SpawnResult } from "../types";
 
 export function loadConfig() {
@@ -38,7 +39,13 @@ export function ptySpawn(opts: SpawnOpts) {
   });
 }
 
+export function clipboardReadText() {
+  return invoke<string>("clipboard_read_text");
+}
+
 export function ptyWrite(sessionId: string, data: string) {
+  // OSC replies are terminal protocol, not keystrokes.
+  if (!data.startsWith("\x1b]")) notePtyUserInput(sessionId);
   return invoke<void>("pty_write", { sessionId, data });
 }
 

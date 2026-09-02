@@ -1,3 +1,4 @@
+mod clipboard;
 mod config;
 mod error;
 mod fs;
@@ -47,6 +48,7 @@ pub fn run() {
             fs::fs_list,
             fs::fs_open,
             fs::check_dir,
+            clipboard::clipboard_read_text,
             pty::pty_spawn,
             pty::pty_write,
             pty::pty_resize,

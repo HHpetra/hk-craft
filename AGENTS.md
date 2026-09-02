@@ -104,11 +104,11 @@
 | 场景 | 命令 | 说明 |
 | :--- | :--- | :--- |
 | **依赖安装** | `pnpm install` | 安装前端依赖 |
-| **开发调试** | `pnpm tauri dev` | 启动 Tauri 桌面端与 Vite HMR 前端 |
+| **开发调试** | `pnpm dev` | 启动 HK-Craft 桌面端与 Vite HMR 前端 |
 | **前端检查** | `pnpm lint` / `pnpm type-check` | TypeScript 类型检查与 ESLint |
 | **Rust 检查** | `cargo check` / `cargo clippy` | Rust 静态分析与规范检查 |
 | **单元测试** | `cargo test` / `pnpm test` | 后端与前端逻辑测试 |
-| **生产打包** | `pnpm tauri build` | 构建可分发的安装包/二进制 |
+| **生产打包** | `pnpm build` | 构建可分发的安装包/二进制 |
 
 ---
 

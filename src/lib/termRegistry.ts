@@ -3,7 +3,8 @@ import type { IDisposable } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { listen } from "@tauri-apps/api/event";
-import { ptyResize, ptyWrite } from "./api";
+import { ptyResize, ptyWrite, clipboardReadText } from "./api";
+import { attachImeAnchor } from "./imeAnchor";
 import { parseSessionId } from "./format";
 import { hexToOscRgb, normalizeTheme, xtermThemes, type XtermTheme } from "./theme";
 import type { PtyOutput } from "../types";
@@ -14,7 +15,14 @@ type RegistryEntry = {
   fit: FitAddon;
   host: HTMLDivElement;
   osc: IDisposable[];
+  composing: boolean;
+  imeDetach?: () => void;
   fitted?: boolean;
+};
+
+type CoreViewport = {
+  _renderService?: { dimensions?: { css?: { cell?: { width: number; height: number } } } };
+  viewport?: { scrollBarWidth?: number };
 };
 
 const BUNDLED_NERD_FONT = "CaskaydiaCove Nerd Font Mono";
@@ -309,11 +317,74 @@ function buildTerminal(sessionId: string): RegistryEntry {
     void ptyWrite(sessionId, data).catch(() => undefined);
   });
 
-  return { sessionId, term, fit, host, osc };
+  return { sessionId, term, fit, host, osc, composing: false };
+}
+
+function isPasteShortcut(event: KeyboardEvent) {
+  if (event.type !== "keydown" || event.altKey) return false;
+  if (event.code === "Insert" && event.shiftKey && !event.ctrlKey && !event.metaKey) {
+    return true;
+  }
+  return event.code === "KeyV" && (event.ctrlKey || event.metaKey);
+}
+
+async function readClipboardText() {
+  try {
+    const text = await navigator.clipboard.readText();
+    if (text) return text;
+  } catch {
+    // WebView often denies clipboard-read without an extra permission
+  }
+  try {
+    return await clipboardReadText();
+  } catch {
+    return "";
+  }
+}
+
+function bindTerminalInput(entry: RegistryEntry) {
+  const { term } = entry;
+  term.attachCustomKeyEventHandler((event) => {
+    if (!isPasteShortcut(event)) return true;
+    event.preventDefault();
+    void readClipboardText().then((text) => {
+      if (text) term.paste(text);
+    });
+    return false;
+  });
+
+  const textarea = term.textarea;
+  if (!textarea) return;
+
+  entry.imeDetach = attachImeAnchor(term);
+
+  const onStart = () => {
+    entry.composing = true;
+  };
+  const onEnd = () => {
+    entry.composing = false;
+    scheduleFitAndResize(entry.sessionId, entry);
+  };
+  textarea.addEventListener("compositionstart", onStart);
+  textarea.addEventListener("compositionend", onEnd);
+  textarea.addEventListener(
+    "paste",
+    (event) => {
+      const fromEvent = event.clipboardData?.getData("text/plain") ?? "";
+      if (fromEvent) return;
+      event.preventDefault();
+      event.stopPropagation();
+      void readClipboardText().then((text) => {
+        if (text) term.paste(text);
+      });
+    },
+    true,
+  );
 }
 
 function openAndRegister(entry: RegistryEntry) {
   entry.term.open(entry.host);
+  bindTerminalInput(entry);
   refreshWhenFontsReady(entry.term);
   registry.set(entry.sessionId, entry);
   flushPending(entry.sessionId, entry.term);
@@ -337,8 +408,23 @@ export function applyRegisteredXtermTheme(theme: string) {
   }
 }
 
+const fitTimers = new Map<string, number>();
+
+export function scheduleFitAndResize(sessionId: string, entry: RegistryEntry, delayMs = 50) {
+  const prev = fitTimers.get(sessionId);
+  if (prev !== undefined) window.clearTimeout(prev);
+  fitTimers.set(
+    sessionId,
+    window.setTimeout(() => {
+      fitTimers.delete(sessionId);
+      fitAndResize(sessionId, entry);
+    }, delayMs),
+  );
+}
+
 export function fitAndResize(sessionId: string, entry: RegistryEntry) {
-  const dims = entry.fit.proposeDimensions();
+  if (entry.composing) return;
+  const dims = proposePaneDimensions(entry);
   if (!dims || dims.cols < 2 || dims.rows < 2) return;
   entry.fitted = true;
   // only a real size change may reach the pty: a rows-growth makes ConPTY
@@ -347,9 +433,24 @@ export function fitAndResize(sessionId: string, entry: RegistryEntry) {
     rememberFittedSize(sessionId, dims.cols, dims.rows);
     return;
   }
-  entry.fit.fit();
+  entry.term.resize(dims.cols, dims.rows);
   rememberFittedSize(sessionId, entry.term.cols, entry.term.rows);
   void ptyResize(sessionId, entry.term.cols, entry.term.rows).catch(() => undefined);
+}
+
+function proposePaneDimensions(entry: RegistryEntry) {
+  const core = (entry.term as unknown as { _core?: CoreViewport })._core;
+  const cell = core?._renderService?.dimensions?.css?.cell;
+  if (!cell?.width || !cell?.height) return entry.fit.proposeDimensions();
+  const scrollbar =
+    entry.term.options.scrollback === 0 ? 0 : (core?.viewport?.scrollBarWidth ?? 0);
+  const availW = entry.host.clientWidth - scrollbar;
+  const availH = entry.host.clientHeight;
+  if (availW < 16 || availH < 16) return undefined;
+  return {
+    cols: Math.max(2, Math.floor(availW / cell.width)),
+    rows: Math.max(2, Math.floor(availH / cell.height)),
+  };
 }
 
 // The pane size a session should be spawned with; null until the pane has
@@ -386,8 +487,14 @@ export function disposeTerminal(sessionId: string) {
   closedSessions.add(sessionId);
   pending.delete(sessionId);
   generations.delete(sessionId);
+  const timer = fitTimers.get(sessionId);
+  if (timer !== undefined) {
+    window.clearTimeout(timer);
+    fitTimers.delete(sessionId);
+  }
   const entry = registry.get(sessionId);
   if (!entry) return;
+  entry.imeDetach?.();
   registry.delete(sessionId);
   for (const d of entry.osc) {
     try {

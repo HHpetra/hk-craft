@@ -3,6 +3,7 @@ import { cn, parseSessionId } from "../../lib/format";
 import {
   fitAndResize,
   getOrCreateTerminal,
+  scheduleFitAndResize,
   type RegistryEntry,
 } from "../../lib/termRegistry";
 import type { SessionKind } from "../../types";
@@ -35,7 +36,7 @@ export function TerminalPane({ sessionId, kind, interactive }: TerminalPaneProps
       }
       ro = new ResizeObserver(() => {
         if (!interactive) return;
-        requestAnimationFrame(() => fitAndResize(sessionId, entry));
+        scheduleFitAndResize(sessionId, entry);
       });
       ro.observe(container);
       requestAnimationFrame(() => fitAndResize(sessionId, entry));

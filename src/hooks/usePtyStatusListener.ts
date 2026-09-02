@@ -3,31 +3,22 @@ import { useEffect } from "react";
 import type { PtyExit, PtyOutput, SessionStatus } from "../types";
 import { parseSessionId } from "../lib/format";
 import { notifyTaskDone } from "../lib/notify";
+import {
+  getPtyActivity,
+  isPtyEcho,
+  isRecentPtyUserInput,
+  type PtyActivityTrack,
+} from "../lib/ptyActivity";
 import { sessionKindLabel } from "../lib/status";
 import { isCurrentGeneration } from "../lib/termRegistry";
 import { useWorkspace } from "../store/workspace";
 
 const SILENCE_MS = 1500;
 const NOTIFY_BUSY_MS = 8000;
+/** Silence after typing/deleting is "waiting for the user", not task completion. */
+const USER_WAIT_MS = SILENCE_MS + 1000;
 
-type Track = {
-  lastOutput: number;
-  runningSince: number | null;
-  timer: ReturnType<typeof setTimeout> | null;
-};
-
-const tracks = new Map<string, Track>();
-
-function getTrack(id: string): Track {
-  let track = tracks.get(id);
-  if (!track) {
-    track = { lastOutput: 0, runningSince: null, timer: null };
-    tracks.set(id, track);
-  }
-  return track;
-}
-
-function clearTimer(track: Track) {
+function clearTimer(track: PtyActivityTrack) {
   if (track.timer) {
     clearTimeout(track.timer);
     track.timer = null;
@@ -64,13 +55,17 @@ function maybeNotify(sessionId: string, runningSince: number | null) {
 }
 
 function scheduleSilence(sessionId: string) {
-  const track = getTrack(sessionId);
+  const track = getPtyActivity(sessionId);
   clearTimer(track);
   track.timer = setTimeout(() => {
     const state = useWorkspace.getState();
     const current = state.sessionStatus[sessionId];
     if (current !== "running") return;
-    maybeNotify(sessionId, track.runningSince);
+    // Editing the Agent prompt (especially clearing it) redraws the TUI and
+    // looks like a long-running job if we only watch output silence.
+    if (!isRecentPtyUserInput(track, USER_WAIT_MS)) {
+      maybeNotify(sessionId, track.runningSince);
+    }
     track.runningSince = null;
     state.setSessionStatus(sessionId, "waiting");
   }, SILENCE_MS);
@@ -87,9 +82,12 @@ export function usePtyStatusListener() {
       const id = event.payload.session_id;
       if (!isOpenedSession(id)) return;
       if (!isCurrentGeneration(id, event.payload.generation ?? 0)) return;
-      const track = getTrack(id);
-      track.lastOutput = Date.now();
-      if (track.runningSince === null) track.runningSince = Date.now();
+      const track = getPtyActivity(id);
+      const now = Date.now();
+      track.lastOutput = now;
+      if (!isPtyEcho(track, now) && track.runningSince === null) {
+        track.runningSince = now;
+      }
       const current = useWorkspace.getState().sessionStatus[id];
       if (current !== "running") setSessionStatus(id, "running");
       scheduleSilence(id);
@@ -105,7 +103,7 @@ export function usePtyStatusListener() {
       const id = event.payload.session_id;
       if (!isOpenedSession(id)) return;
       if (!isCurrentGeneration(id, event.payload.generation ?? 0)) return;
-      const track = getTrack(id);
+      const track = getPtyActivity(id);
       clearTimer(track);
       maybeNotify(id, track.runningSince);
       track.runningSince = null;
