@@ -2,37 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { CircleStop, Folder, Plus, Settings, X } from "lucide-react";
 import { cn } from "../../lib/format";
 import { paneSessionId, terminalPanes } from "../../lib/panes";
+import { DRAG_THRESHOLD, finalIndex, insertSlot, lineForSlot, type DropLine } from "../../lib/reorder";
 import { projectBadge } from "../../lib/status";
 import { useWorkspace } from "../../store/workspace";
 import { StatusDot } from "../ui/StatusDot";
-
-type DropPlace = "before" | "after";
-type DropLine = { id: string; place: DropPlace };
-
-const DRAG_THRESHOLD = 6;
-
-function insertSlotFromY(root: HTMLElement, clientY: number): number {
-  const rows = [...root.querySelectorAll<HTMLElement>("[data-project-id]")];
-  if (rows.length === 0) return 0;
-  for (let i = 0; i < rows.length; i++) {
-    const rect = rows[i].getBoundingClientRect();
-    if (clientY < rect.top + rect.height / 2) return i;
-  }
-  return rows.length;
-}
-
-function finalIndex(slot: number, fromIndex: number): number {
-  if (fromIndex < 0) return slot;
-  return slot > fromIndex ? slot - 1 : slot;
-}
-
-function lineForSlot(ids: string[], slot: number, fromIndex: number): DropLine | null {
-  if (ids.length === 0) return null;
-  if (fromIndex >= 0 && finalIndex(slot, fromIndex) === fromIndex) return null;
-  if (slot <= 0) return { id: ids[0], place: "before" };
-  if (slot >= ids.length) return { id: ids[ids.length - 1], place: "after" };
-  return { id: ids[slot], place: "before" };
-}
 
 export function ProjectSidebar() {
   const projects = useWorkspace((s) => s.config?.projects ?? []);
@@ -76,7 +49,7 @@ export function ProjectSidebar() {
       const root = rootRef.current;
       if (!root) return;
       const ids = idsRef.current;
-      const slot = insertSlotFromY(root, event.clientY);
+      const slot = insertSlot(root, "[data-project-id]", event.clientY, "y");
       const next = lineForSlot(ids, slot, ids.indexOf(drag.id));
       setDropLine((prev) => (prev?.id === next?.id && prev?.place === next?.place ? prev : next));
     };
@@ -92,7 +65,7 @@ export function ProjectSidebar() {
       dragEndedAt.current = Date.now();
       const root = rootRef.current;
       const ids = idsRef.current;
-      const slot = root ? insertSlotFromY(root, event.clientY) : -1;
+      const slot = root ? insertSlot(root, "[data-project-id]", event.clientY, "y") : -1;
       const toIndex = slot < 0 ? -1 : finalIndex(slot, ids.indexOf(drag.id));
       clearVisual();
       if (toIndex >= 0) void useWorkspace.getState().reorderProjects(drag.id, toIndex);

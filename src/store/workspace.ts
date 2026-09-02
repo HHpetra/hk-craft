@@ -52,6 +52,7 @@ interface WorkspaceState {
   updateProjectPreset: (id: string, agentPreset: string) => Promise<void>;
   addPane: (kind: PaneKind, presetId?: string) => Promise<void>;
   closePane: (paneId: string) => Promise<void>;
+  reorderPanes: (fromId: string, toIndex: number) => Promise<void>;
   setLayout: (layout: WorkspaceLayout) => Promise<void>;
   setActivePane: (paneId: string) => Promise<void>;
   spawnForProject: (project: Project) => Promise<void>;
@@ -362,6 +363,32 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     const active_pane_id =
       project.active_pane_id === paneId ? neighborPaneId(project.panes ?? [], paneId) : project.active_pane_id;
     await get().persist(patchProject(config, activeProjectId, { panes, active_pane_id }));
+  },
+
+  reorderPanes: async (fromId, toIndex) => {
+    const { config, activeProjectId } = get();
+    if (!config || !activeProjectId) return;
+    const project = config.projects.find((p) => p.id === activeProjectId);
+    if (!project) return;
+    const prev = project.panes ?? [];
+    const fromIndex = prev.findIndex((pane) => pane.id === fromId);
+    if (fromIndex < 0 || prev.length === 0) return;
+    const clamped = Math.max(0, Math.min(toIndex, prev.length - 1));
+    if (fromIndex === clamped) return;
+    const panes = [...prev];
+    const [moved] = panes.splice(fromIndex, 1);
+    if (!moved) return;
+    panes.splice(clamped, 0, moved);
+    const next = patchProject(config, activeProjectId, { panes });
+    set({ config: next });
+    const saved = await get().persist(next);
+    if (!saved) {
+      set((s) => ({
+        config: s.config
+          ? patchProject(s.config, activeProjectId, { panes: prev })
+          : patchProject(config, activeProjectId, { panes: prev }),
+      }));
+    }
   },
 
   setLayout: async (layout) => {
