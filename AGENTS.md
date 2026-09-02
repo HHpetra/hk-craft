@@ -31,7 +31,7 @@
 ### 2.1 三位一体（The Trinity）视图模型
 每个项目（Project）在工作区内拥有独立的上下文。打开项目时默认三个面板 Tab：
 1. **📂 文件资源管理器 (File Explorer)**：主流详细列表视图（名称/修改时间/类型/大小）、路径面包屑导航、快速搜索过滤及常用外部目录书签栏。
-2. **🤖 Agent 终端 (Agent CLI)**：专用于运行 `cursor-agent`、`opencode`、`claude`、`aider` 等 CLI 交互；默认使用项目绑定的 Agent 预设，也可再开与默认不同的 Agent 面板。
+2. **🤖 Agent 终端 (Agent CLI)**：专用于运行 `cursor-agent`、`opencode`、`claude`、`dsh-tui` 等 CLI 交互；默认使用项目绑定的 Agent 预设，也可再开与默认不同的 Agent 面板。
 3. **⚡ 运行终端 (Runner Terminal)**：纯净的系统 Shell，用于本地测试、编译、开发服务器运行。
 
 同一项目可同时打开多个资源管理器、多个 Agent、多个运行终端。每个终端面板对应独立的 PTY（`{projectId}:{kind}:{paneId}`）。

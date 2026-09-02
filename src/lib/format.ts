@@ -56,7 +56,7 @@ export function resumeArgsForSession(command: string, sessionId: string | null |
       .pop()
       ?.replace(/\.(exe|cmd)$/i, "")
       .toLowerCase() ?? "";
-  if (bin === "cursor-agent" || bin === "agent" || bin === "claude") {
+  if (bin === "cursor-agent" || bin === "agent" || bin === "claude" || bin === "dsh-tui" || bin === "dst") {
     return ["--resume", sessionId];
   }
   if (bin === "opencode") return ["--session", sessionId];

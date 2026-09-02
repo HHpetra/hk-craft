@@ -2,7 +2,7 @@
 
 当前项目已经不是「设计稿」，而是一台能跑起来的 **CLI Agent 三位一体桌面工作台**：左侧管项目，右侧固定三栏（资源管理 / Agent 终端 / Runner 终端），PTY 常驻在 Rust 里，切项目、切视图都不杀进程。
 
-它解决的痛点很具体：用 `cursor-agent` / `opencode` / `claude` / `aider` 时，既不想开一整套 IDE，也不想在一堆终端窗口里找「哪个是 Agent、哪个是 npm test」。同类开源软件很多，但几乎没有一个和本项目一模一样——多数要么做成「多 Agent IDE」，要么做成「超级终端」。增强时应该 **借能力、不借产品形态**。
+它解决的痛点很具体：用 `cursor-agent` / `opencode` / `claude` / `dsh-tui` 时，既不想开一整套 IDE，也不想在一堆终端窗口里找「哪个是 Agent、哪个是 npm test」。同类开源软件很多，但几乎没有一个和本项目一模一样——多数要么做成「多 Agent IDE」，要么做成「超级终端」。增强时应该 **借能力、不借产品形态**。
 
 对照设计文档：[`agent-workbench-design.md`](./agent-workbench-design.md)。
 
@@ -32,7 +32,7 @@ flowchart LR
 | 文件管理器 | 书签、面包屑、过滤、排序、列表/图标、双击用系统默认程序打开 | `src/components/explorer/FileExplorer.tsx`、`src-tauri/src/fs/mod.rs` |
 | 拖拽注入 | Agent 用可配置前缀（默认 `@`），Runner 用引号绝对路径 | `src/lib/dnd.ts` |
 | PTY 保活 | `portable-pty`、会话复用、generation 防串流、Windows UTF-8/GBK、剥离 conda/venv 污染 PATH | `src-tauri/src/pty/mod.rs` |
-| Agent 预设 | cursor-agent / opencode / claude / aider，命令与拖拽前缀可配 | `src-tauri/src/config/mod.rs` |
+| Agent 预设 | cursor-agent / opencode / claude / dsh-tui，命令与拖拽前缀可配 | `src-tauri/src/config/mod.rs` |
 | 会话续跑 | 轮询 `~/.cursor/chats`、`agent-transcripts`、`~/.claude/projects`，启动时 `--resume` / `--session` | `src-tauri/src/session.rs`、`src/hooks/useAgentSessionCapture.ts` |
 | 状态与通知 | 输出中 / 等待输入 / 退出 / 错误；长时间任务结束后系统 Toast | `src/hooks/usePtyStatusListener.ts`、`src/lib/notify.ts` |
 

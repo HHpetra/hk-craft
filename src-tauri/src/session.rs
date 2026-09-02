@@ -42,7 +42,7 @@ fn resume_args(command: &str, session_id: &str) -> Vec<String> {
         return Vec::new();
     }
     match agent_bin(command).as_str() {
-        "cursor-agent" | "agent" | "claude" => {
+        "cursor-agent" | "agent" | "claude" | "dsh-tui" | "dst" => {
             vec!["--resume".into(), session_id.to_string()]
         }
         "opencode" => vec!["--session".into(), session_id.to_string()],
@@ -232,7 +232,8 @@ mod tests {
             vec!["--resume", "abc"]
         );
         assert_eq!(resume_args("opencode", "s1"), vec!["--session", "s1"]);
-        assert!(resume_args("aider", "x").is_empty());
+        assert_eq!(resume_args("dsh-tui", "sess"), vec!["--resume", "sess"]);
+        assert_eq!(resume_args("dst", "sess"), vec!["--resume", "sess"]);
     }
 
     #[test]

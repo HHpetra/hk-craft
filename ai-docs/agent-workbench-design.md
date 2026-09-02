@@ -52,7 +52,7 @@
   - 拖入 Runner 终端，自动格式化为标准双引号绝对路径（`"C:\path\to\file.ts"`）。
 
 ### 2. 🤖 Agent 终端 & ⚡ Runner 终端
-- **Agent 终端**：绑定当前项目的 Agent 预设模板（如 `cursor-agent` / `opencode` / `claude` / `aider`），项目激活时自动拉起。
+- **Agent 终端**：绑定当前项目的 Agent 预设模板（如 `cursor-agent` / `opencode` / `claude` / `dsh-tui`），项目激活时自动拉起。
 - **Runner 终端**：纯净的工作目录 Shell（PowerShell / CMD / Bash），用于常规程序运行与调试。
 - **状态感知**：监听终端静默与退出状态，在 Tab 与按钮上显示状态指示灯；后台长时间任务完成时触发系统 Toast 提醒。
 

@@ -200,13 +200,28 @@ fn default_presets() -> Vec<AgentPreset> {
             command: "claude".into(),
             drag_prefix: "@".into(),
         },
-        AgentPreset {
-            id: "aider".into(),
-            name: "Aider".into(),
-            command: "aider".into(),
-            drag_prefix: "@".into(),
-        },
+        dsh_tui_preset(),
     ]
+}
+
+fn dsh_tui_preset() -> AgentPreset {
+    AgentPreset {
+        id: "dsh-tui".into(),
+        name: "DeepSeek Harness TUI".into(),
+        command: "dsh-tui".into(),
+        drag_prefix: "@".into(),
+    }
+}
+
+fn fallback_preset_id(presets: &[AgentPreset]) -> String {
+    if presets.iter().any(|preset| preset.id == "cursor-agent") {
+        "cursor-agent".into()
+    } else {
+        presets
+            .first()
+            .map(|preset| preset.id.clone())
+            .unwrap_or_else(|| "cursor-agent".into())
+    }
 }
 
 impl AppConfig {
@@ -224,6 +239,11 @@ impl AppConfig {
         if self.agent_presets.is_empty() {
             self.agent_presets = default_presets();
         }
+        self.agent_presets.retain(|preset| preset.id != "aider");
+        if !self.agent_presets.iter().any(|preset| preset.id == "dsh-tui") {
+            self.agent_presets.push(dsh_tui_preset());
+        }
+        let fallback = fallback_preset_id(&self.agent_presets);
         if self.settings.default_split_ratio.len() != 3 {
             self.settings.default_split_ratio = default_split_ratio();
         }
@@ -237,12 +257,8 @@ impl AppConfig {
             if project.id.is_empty() {
                 project.id = uuid::Uuid::new_v4().to_string();
             }
-            if project.agent_preset.is_empty() {
-                project.agent_preset = self
-                    .agent_presets
-                    .first()
-                    .map(|p| p.id.clone())
-                    .unwrap_or_else(|| "cursor-agent".into());
+            if project.agent_preset.is_empty() || project.agent_preset == "aider" {
+                project.agent_preset = fallback.clone();
             }
             project.layout = normalize_layout(&project.layout);
             if project.panes.is_none() {
@@ -250,6 +266,13 @@ impl AppConfig {
                     &project.agent_preset,
                     project.agent_session_id.as_deref(),
                 ));
+            }
+            if let Some(panes) = project.panes.as_mut() {
+                for pane in panes {
+                    if pane.preset_id.as_deref() == Some("aider") {
+                        pane.preset_id = Some(fallback.clone());
+                    }
+                }
             }
             let panes = project.panes.as_deref().unwrap_or(&[]);
             let active_ok = project
@@ -320,6 +343,8 @@ mod tests {
     fn default_config_has_presets_and_split() {
         let cfg = AppConfig::default();
         assert_eq!(cfg.agent_presets.len(), 4);
+        assert_eq!(cfg.agent_presets[3].id, "dsh-tui");
+        assert_eq!(cfg.agent_presets[3].command, "dsh-tui");
         assert_eq!(cfg.settings.theme, "dark");
         assert_eq!(cfg.settings.explorer_view, "list");
         assert_eq!(cfg.settings.default_split_ratio, vec![30.0, 40.0, 30.0]);
@@ -385,5 +410,57 @@ mod tests {
         assert_eq!(cfg.projects[0].layout, "tabs");
         assert_eq!(cfg.projects[0].panes.as_ref().map(Vec::len), Some(0));
         assert_eq!(cfg.projects[0].active_pane_id, None);
+    }
+
+    #[test]
+    fn migrate_replaces_aider_with_dsh_tui() {
+        let mut cfg = AppConfig {
+            agent_presets: vec![
+                AgentPreset {
+                    id: "cursor-agent".into(),
+                    name: "Cursor Agent".into(),
+                    command: "cursor-agent".into(),
+                    drag_prefix: "@".into(),
+                },
+                AgentPreset {
+                    id: "aider".into(),
+                    name: "Aider".into(),
+                    command: "aider".into(),
+                    drag_prefix: "@".into(),
+                },
+            ],
+            projects: vec![Project {
+                id: "proj-1".into(),
+                name: "demo".into(),
+                path: "C:/tmp".into(),
+                agent_preset: "aider".into(),
+                panes: Some(vec![WorkspacePane {
+                    id: "pane-agent".into(),
+                    kind: "agent".into(),
+                    preset_id: Some("aider".into()),
+                    agent_session_id: None,
+                }]),
+                ..Project::default()
+            }],
+            ..AppConfig::default()
+        };
+        cfg.migrate();
+        assert!(cfg.agent_presets.iter().all(|preset| preset.id != "aider"));
+        assert!(cfg.agent_presets.iter().any(|preset| preset.id == "dsh-tui"));
+        assert_eq!(cfg.projects[0].agent_preset, "cursor-agent");
+        assert_eq!(
+            cfg.projects[0].panes.as_ref().unwrap()[0]
+                .preset_id
+                .as_deref(),
+            Some("cursor-agent")
+        );
+        cfg.migrate();
+        assert_eq!(
+            cfg.agent_presets
+                .iter()
+                .filter(|preset| preset.id == "dsh-tui")
+                .count(),
+            1
+        );
     }
 }
