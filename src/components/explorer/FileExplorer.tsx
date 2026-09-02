@@ -232,7 +232,13 @@ export function FileExplorer() {
               ))}
             </div>
           ) : (
-            <table className="w-full text-left">
+            <table className="w-full table-fixed text-left">
+              <colgroup>
+                <col className="w-[42%]" />
+                <col className="w-[28%]" />
+                <col className="w-[16%]" />
+                <col className="w-[14%]" />
+              </colgroup>
               <thead className="sticky top-0 bg-surface-header text-[11px] uppercase tracking-wide text-ink-subtle">
                 <tr>
                   {(
@@ -243,7 +249,7 @@ export function FileExplorer() {
                       ["size", "大小"],
                     ] as const
                   ).map(([key, label]) => (
-                    <th key={key} className="px-3 py-2 font-medium">
+                    <th key={key} className="truncate px-3 py-2 font-medium">
                       <button type="button" onClick={() => toggleSort(key)}>
                         {label}
                         {sortKey === key ? (sortAsc ? " ↑" : " ↓") : ""}
@@ -259,23 +265,23 @@ export function FileExplorer() {
                     draggable
                     onDragStart={(e) => startDrag(e, entry.path)}
                     onDoubleClick={() => openEntry(entry)}
-                    className="cursor-default border-t border-line text-ink hover:bg-hover"
+                    className="h-8 cursor-default border-t border-line text-ink hover:bg-hover"
                   >
-                    <td className="px-3 py-1.5">
-                      <span className="flex items-center gap-2">
+                    <td className="overflow-hidden whitespace-nowrap px-3 py-1.5">
+                      <span className="flex min-w-0 items-center gap-2">
                         {entry.is_dir ? (
                           <Folder size={14} className="shrink-0 text-sky-500" />
                         ) : (
                           <FileIcon size={14} className="shrink-0 text-ink-subtle" />
                         )}
-                        <span className="truncate">{entry.name}</span>
+                        <span className="min-w-0 truncate">{entry.name}</span>
                       </span>
                     </td>
-                    <td className="whitespace-nowrap px-3 py-1.5 text-ink-muted">
+                    <td className="truncate px-3 py-1.5 text-ink-muted">
                       {formatTime(entry.modified)}
                     </td>
-                    <td className="px-3 py-1.5 text-ink-muted">{entry.kind}</td>
-                    <td className="px-3 py-1.5 text-ink-muted">
+                    <td className="truncate px-3 py-1.5 text-ink-muted">{entry.kind}</td>
+                    <td className="truncate px-3 py-1.5 text-ink-muted">
                       {formatSize(entry.size, entry.is_dir)}
                     </td>
                   </tr>
