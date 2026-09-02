@@ -107,24 +107,28 @@ export function SettingsDialog() {
   }
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50">
-      <div className="max-h-[85vh] w-[680px] max-w-[90vw] overflow-auto rounded-lg border border-line bg-surface-elevated p-4 shadow-xl">
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-sm font-medium text-ink">软件设置</h2>
-          <button type="button" onClick={() => setOpen(false)} className="text-ink-subtle hover:text-ink">
-            <X size={16} />
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 backdrop-blur-[2px]">
+      <div className="max-h-[85vh] w-[680px] max-w-[90vw] overflow-auto rounded-xl border border-line bg-surface-elevated p-5 shadow-2xl">
+        <div className="mb-5 flex items-center justify-between">
+          <h2 className="text-[13px] font-semibold text-ink">软件设置</h2>
+          <button
+            type="button"
+            onClick={() => setOpen(false)}
+            className="rounded p-0.5 text-ink-subtle hover:bg-hover hover:text-ink"
+          >
+            <X size={15} />
           </button>
         </div>
 
         <section className="mb-5">
-          <div className="mb-2 text-xs text-ink-subtle">主题</div>
+          <div className="mb-2 text-[11px] font-medium uppercase tracking-wider text-ink-subtle">主题</div>
           <div className="flex gap-2">
             {(["dark", "light"] as const).map((value) => (
               <button
                 key={value}
                 type="button"
                 onClick={() => void setTheme(value)}
-                className={`rounded-md px-3 py-1.5 ${
+                className={`rounded-md px-3 py-1.5 text-[12px] ${
                   theme === value ? "bg-btn text-btn-fg" : "bg-field text-ink hover:bg-hover"
                 }`}
               >
@@ -135,11 +139,11 @@ export function SettingsDialog() {
         </section>
 
         <section className="mb-5">
-          <div className="mb-2 text-xs text-ink-subtle">终端字体</div>
+          <div className="mb-2 text-[11px] font-medium uppercase tracking-wider text-ink-subtle">终端字体</div>
           <select
             value={config.settings.terminal_font ?? ""}
             onChange={(e) => void setTerminalFont(e.target.value)}
-            className="w-full rounded-md bg-field px-2 py-1.5 text-ink outline-none"
+            className="w-full rounded-md bg-field px-2 py-1.5 text-[12px] text-ink outline-none"
           >
             <option value="" className="bg-surface-elevated">
               自动（优先本机 Nerd Font）
@@ -157,14 +161,14 @@ export function SettingsDialog() {
               </option>
             ))}
           </select>
-          <p className="mt-1 text-[11px] text-ink-subtle">
+          <p className="mt-1.5 text-[11px] text-ink-subtle">
             自动模式优先使用本机已安装的 Nerd Font（例如 Maple Mono NF CN），没有再用内置字体。
           </p>
         </section>
 
         <section className="mb-5">
-          <div className="mb-2 text-xs text-ink-subtle">Agent 会话</div>
-          <label className="flex items-center gap-2 text-ink">
+          <div className="mb-2 text-[11px] font-medium uppercase tracking-wider text-ink-subtle">Agent 会话</div>
+          <label className="flex items-center gap-2 text-[12px] text-ink">
             <input
               type="checkbox"
               checked={config.settings.resume_on_start !== false}
@@ -172,17 +176,17 @@ export function SettingsDialog() {
             />
             启动时按面板恢复上次的 Agent 会话
           </label>
-          <p className="mt-1 text-[11px] text-ink-subtle">
+          <p className="mt-1.5 text-[11px] text-ink-subtle">
             每个 Agent 面板会记住当前会话 ID，下次用 --resume / --session 精确接上。多个面板互不影响。终端画面不会恢复。
           </p>
         </section>
 
         <section className="mb-5">
-          <div className="mb-2 flex items-center justify-between text-xs text-ink-subtle">
-            <span>Agent 预设</span>
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-[11px] font-medium uppercase tracking-wider text-ink-subtle">Agent 预设</span>
             <button
               type="button"
-              className="flex items-center gap-1 text-ink-muted hover:text-ink"
+              className="flex items-center gap-1 text-[11px] text-ink-muted hover:text-ink"
               onClick={() =>
                 setPresets([
                   ...presets,
@@ -195,13 +199,13 @@ export function SettingsDialog() {
                 ])
               }
             >
-              <Plus size={12} />
+              <Plus size={11} />
               新增
             </button>
           </div>
-          <div className="max-h-48 space-y-2 overflow-auto">
+          <div className="max-h-48 space-y-1.5 overflow-auto">
             {presets.map((preset, index) => (
-              <div key={preset.id} className="grid grid-cols-[1fr_1fr_72px_28px] gap-2">
+              <div key={preset.id} className="grid grid-cols-[1fr_1fr_72px_28px] gap-1.5">
                 <input
                   value={preset.name}
                   onChange={(e) => {
@@ -209,7 +213,7 @@ export function SettingsDialog() {
                     next[index] = { ...preset, name: e.target.value };
                     setPresets(next);
                   }}
-                  className="rounded-md bg-field px-2 py-1 text-ink outline-none"
+                  className="rounded bg-field px-2 py-1 text-[12px] text-ink outline-none"
                 />
                 <input
                   value={preset.command}
@@ -218,7 +222,7 @@ export function SettingsDialog() {
                     next[index] = { ...preset, command: e.target.value };
                     setPresets(next);
                   }}
-                  className="rounded-md bg-field px-2 py-1 text-ink outline-none"
+                  className="rounded bg-field px-2 py-1 text-[12px] text-ink outline-none"
                 />
                 <input
                   value={preset.drag_prefix}
@@ -227,11 +231,11 @@ export function SettingsDialog() {
                     next[index] = { ...preset, drag_prefix: e.target.value };
                     setPresets(next);
                   }}
-                  className="rounded-md bg-field px-2 py-1 text-ink outline-none"
+                  className="rounded bg-field px-2 py-1 text-[12px] text-ink outline-none"
                 />
                 <button
                   type="button"
-                  className="text-ink-subtle hover:text-red-500"
+                  className="flex items-center justify-center text-ink-subtle hover:text-red-400"
                   title="删除预设"
                   onClick={() => {
                     if (presets.length <= 1) {
@@ -241,7 +245,7 @@ export function SettingsDialog() {
                     setPresets(presets.filter((p) => p.id !== preset.id));
                   }}
                 >
-                  <Trash2 size={14} />
+                  <Trash2 size={13} />
                 </button>
               </div>
             ))}
@@ -249,20 +253,20 @@ export function SettingsDialog() {
         </section>
 
         <section className="mb-5">
-          <div className="mb-2 text-xs text-ink-subtle">项目 Agent 绑定</div>
-          <div className="space-y-2">
+          <div className="mb-2 text-[11px] font-medium uppercase tracking-wider text-ink-subtle">项目 Agent 绑定</div>
+          <div className="space-y-1.5">
             {config.projects.length === 0 && (
-              <div className="text-ink-subtle">暂无项目</div>
+              <div className="text-[12px] text-ink-subtle">暂无项目</div>
             )}
             {config.projects.map((project) => (
               <label key={project.id} className="flex items-center gap-2">
-                <span className="w-40 truncate text-ink">{project.name}</span>
+                <span className="w-40 truncate text-[12px] text-ink">{project.name}</span>
                 <select
                   value={projectPresets[project.id] ?? project.agent_preset}
                   onChange={(e) =>
                     setProjectPresets((s) => ({ ...s, [project.id]: e.target.value }))
                   }
-                  className="flex-1 rounded-md bg-field px-2 py-1 text-ink outline-none"
+                  className="flex-1 rounded bg-field px-2 py-1 text-[12px] text-ink outline-none"
                 >
                   {presets.map((item) => (
                     <option key={item.id} value={item.id} className="bg-surface-elevated">
@@ -276,16 +280,16 @@ export function SettingsDialog() {
         </section>
 
         <section className="mb-5">
-          <div className="mb-2 text-xs text-ink-subtle">全局书签</div>
+          <div className="mb-2 text-[11px] font-medium uppercase tracking-wider text-ink-subtle">全局书签</div>
           <div className="mb-2 space-y-1">
             {bookmarks.map((item, index) => (
-              <div key={`${item.path}-${index}`} className="flex items-center gap-2 text-ink">
-                <span className="flex-1 truncate">
+              <div key={`${item.path}-${index}`} className="flex items-center gap-2 text-[12px] text-ink">
+                <span className="flex-1 truncate text-ink-muted">
                   {item.name} · {item.path}
                 </span>
                 <button
                   type="button"
-                  className="text-ink-subtle hover:text-ink"
+                  className="shrink-0 text-[11px] text-ink-subtle hover:text-red-400"
                   onClick={() => setBookmarks(bookmarks.filter((_, i) => i !== index))}
                 >
                   删除
@@ -293,22 +297,22 @@ export function SettingsDialog() {
               </div>
             ))}
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-1.5">
             <input
               value={bookmarkName}
               onChange={(e) => setBookmarkName(e.target.value)}
               placeholder="名称"
-              className="w-28 rounded-md bg-field px-2 py-1 text-ink outline-none"
+              className="w-28 rounded bg-field px-2 py-1 text-[12px] text-ink outline-none"
             />
             <input
               value={bookmarkPath}
               onChange={(e) => setBookmarkPath(e.target.value)}
               placeholder="C:\\path\\to\\dir"
-              className="flex-1 rounded-md bg-field px-2 py-1 text-ink outline-none"
+              className="flex-1 rounded bg-field px-2 py-1 text-[12px] text-ink outline-none"
             />
             <button
               type="button"
-              className="rounded-md bg-field px-2 py-1 text-ink hover:bg-hover"
+              className="rounded bg-field px-2 py-1 text-ink hover:bg-hover"
               title="选择目录"
               onClick={() => {
                 void pickDirectory("选择书签目录").then((dir) => {
@@ -316,11 +320,11 @@ export function SettingsDialog() {
                 });
               }}
             >
-              <FolderOpen size={14} />
+              <FolderOpen size={13} />
             </button>
             <button
               type="button"
-              className="rounded-md bg-active px-2 py-1 text-ink hover:bg-hover"
+              className="rounded bg-active px-2.5 py-1 text-[12px] text-ink hover:bg-hover"
               onClick={() => {
                 if (!bookmarkName.trim() || !bookmarkPath.trim()) return;
                 setBookmarks([...bookmarks, { name: bookmarkName.trim(), path: bookmarkPath.trim() }]);
@@ -333,18 +337,18 @@ export function SettingsDialog() {
           </div>
         </section>
 
-        <div className="mt-4 border-t border-line pt-3">
+        <div className="mt-4 border-t border-line pt-4">
           <div className="flex justify-end gap-2">
             <button
               type="button"
-              className="rounded-md px-3 py-1.5 text-ink-muted hover:text-ink"
+              className="rounded-md px-3 py-1.5 text-[12px] text-ink-muted hover:text-ink"
               onClick={() => setOpen(false)}
             >
               取消
             </button>
             <button
               type="button"
-              className="rounded-md bg-btn px-3 py-1.5 text-btn-fg hover:opacity-90"
+              className="rounded-md bg-btn px-3 py-1.5 text-[12px] text-btn-fg hover:opacity-90"
               onClick={save}
             >
               保存
@@ -353,8 +357,8 @@ export function SettingsDialog() {
           <footer className="mt-3 border-t border-line pt-3 select-text text-[11px] leading-5 text-ink-subtle">
             <div>
               {APP_NAME} v{APP_VERSION}
-              <span className="mx-1.5">·</span>
-              <span className="font-mono" title="Git commit">
+              <span className="mx-1.5 opacity-40">·</span>
+              <span className="font-mono opacity-60" title="Git commit">
                 {APP_GIT_HASH}
               </span>
             </div>
@@ -362,7 +366,7 @@ export function SettingsDialog() {
               <span>{updateLabel}</span>
               {update.status === "outdated" && (
                 <>
-                  <span>·</span>
+                  <span className="opacity-40">·</span>
                   <button
                     type="button"
                     className="text-ink-muted hover:text-ink"
@@ -374,7 +378,7 @@ export function SettingsDialog() {
               )}
               {update.status !== "checking" && (
                 <>
-                  <span>·</span>
+                  <span className="opacity-40">·</span>
                   <button
                     type="button"
                     className="text-ink-muted hover:text-ink"
@@ -384,7 +388,7 @@ export function SettingsDialog() {
                   </button>
                 </>
               )}
-              <span>·</span>
+              <span className="opacity-40">·</span>
               <button
                 type="button"
                 className="text-ink-muted hover:text-ink"
