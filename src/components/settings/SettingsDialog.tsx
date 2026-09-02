@@ -11,7 +11,7 @@ import {
   APP_VERSION,
 } from "../../lib/appInfo";
 import { pickDirectory } from "../../lib/dialog";
-import { discoverLocalNerdFonts, listDetectedNerdFonts } from "../../lib/termRegistry";
+import { discoverLocalNerdFonts, listDetectedNerdFonts } from "../../lib/terminalFonts";
 import { checkAppUpdate, type UpdateCheck } from "../../lib/updateCheck";
 import { normalizeTheme } from "../../lib/theme";
 import { useWorkspace } from "../../store/workspace";
@@ -102,18 +102,7 @@ export function SettingsDialog() {
     }).then((ok) => {
       if (!ok) return;
       setOpen(false);
-      const { openedProjectIds, restartPane } = useWorkspace.getState();
-      for (const project of projects) {
-        if (!openedProjectIds.includes(project.id)) continue;
-        for (const pane of project.panes.filter((item) => item.kind === "agent")) {
-          const presetId = pane.preset_id ?? project.agent_preset;
-          const prevCmd = current.agent_presets.find((p) => p.id === presetId)?.command;
-          const nextCmd = presets.find((p) => p.id === presetId)?.command;
-          if (prevCmd !== nextCmd) {
-            void restartPane(project.id, pane.id);
-          }
-        }
-      }
+      useWorkspace.getState().restartOpenedAgentsForPresetChange(current.agent_presets, presets);
     });
   }
 

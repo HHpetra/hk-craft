@@ -1,0 +1,8 @@
+{
+  "agents": [
+    { "bins": ["cursor-agent", "agent"], "resume": "--resume", "discover": "cursor" },
+    { "bins": ["claude"], "resume": "--resume", "discover": "claude" },
+    { "bins": ["dsh-tui", "dst"], "resume": "--resume" },
+    { "bins": ["opencode"], "resume": "--session" }
+  ]
+}

@@ -38,6 +38,13 @@ export function terminalPanes(project: Project) {
   return (project.panes ?? []).filter((pane) => pane.kind === "agent" || pane.kind === "runner");
 }
 
+export function projectSessionIds(projectId: string, project: Project | undefined | null): string[] {
+  if (!project) return [];
+  return terminalPanes(project)
+    .map((pane) => paneSessionId(projectId, pane))
+    .filter((sid): sid is string => Boolean(sid));
+}
+
 export function paneTitle(pane: WorkspacePane, panes: WorkspacePane[], presets: AgentPreset[]) {
   const base =
     pane.kind === "explorer"

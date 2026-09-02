@@ -7,6 +7,7 @@ import { ptyResize, ptyWrite, clipboardReadText } from "./api";
 import { attachImeAnchor } from "./imeAnchor";
 import { parseSessionId } from "./format";
 import { hexToOscRgb, normalizeTheme, xtermThemes, type XtermTheme } from "./theme";
+import { primaryTerminalFont, setPreferredTerminalFont, terminalFontFamily } from "./terminalFonts";
 import type { PtyOutput } from "../types";
 
 type RegistryEntry = {
@@ -25,139 +26,6 @@ type CoreViewport = {
   viewport?: { scrollBarWidth?: number };
 };
 
-const BUNDLED_NERD_FONT = "CaskaydiaCove Nerd Font Mono";
-
-const LOCAL_NERD_CANDIDATES = [
-  "Maple Mono NF CN",
-  "Maple Mono NF",
-  "CaskaydiaCove Nerd Font Mono",
-  "CaskaydiaCove Nerd Font",
-  "CaskaydiaCove NF",
-  "Cascadia Code NF",
-  "JetBrainsMono Nerd Font Mono",
-  "JetBrainsMono Nerd Font",
-  "JetBrainsMono NF",
-  "MesloLGS NF",
-  "FiraCode Nerd Font Mono",
-  "FiraCode Nerd Font",
-  "Hack Nerd Font Mono",
-  "Hack Nerd Font",
-  "Sarasa Term SC Nerd",
-  "Sarasa Term SC Nerd Font",
-];
-
-let preferredTerminalFont = "";
-let queriedLocalNerdFonts: string[] = [];
-
-function fontAvailable(family: string) {
-  try {
-    return document.fonts.check(`12px "${family}"`);
-  } catch {
-    return false;
-  }
-}
-
-function isNerdFamily(name: string) {
-  const n = name.toLowerCase();
-  return n.includes("nerd") || /\bnf\b/.test(n) || n.includes("caskaydia") || n.includes("meslolgs") || n.includes("powerline");
-}
-
-function dropWeightVariants(names: string[]) {
-  const set = new Set(names);
-  return names.filter((name) => {
-    const base = name.replace(
-      /\s+(ExtraBold|ExtraLight|SemiBold|Light|Medium|Thin|Bold|Black|Retina)$/i,
-      "",
-    );
-    return base === name || !set.has(base);
-  });
-}
-
-function uniqueFonts(names: string[]) {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const name of names) {
-    const key = name.trim().toLowerCase();
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
-    out.push(name.trim());
-  }
-  return out;
-}
-
-export function listDetectedNerdFonts() {
-  const fromQuery = queriedLocalNerdFonts.filter(isNerdFamily);
-  const fromCheck = LOCAL_NERD_CANDIDATES.filter(
-    (name) => name !== BUNDLED_NERD_FONT && fontAvailable(name),
-  );
-  return dropWeightVariants(
-    uniqueFonts([...fromQuery, ...fromCheck, ...LOCAL_NERD_CANDIDATES.filter((name) => name !== BUNDLED_NERD_FONT)]),
-  );
-}
-
-export async function discoverLocalNerdFonts() {
-  await Promise.all(
-    LOCAL_NERD_CANDIDATES.map((name) => document.fonts.load(`12px "${name}"`).catch(() => undefined)),
-  );
-  const query = (window as Window & { queryLocalFonts?: () => Promise<{ family: string }[]> }).queryLocalFonts;
-  if (query) {
-    try {
-      const fonts = await query();
-      queriedLocalNerdFonts = uniqueFonts(fonts.map((font) => font.family).filter(isNerdFamily));
-    } catch {
-      queriedLocalNerdFonts = [];
-    }
-  }
-  return listDetectedNerdFonts();
-}
-
-export function setPreferredTerminalFont(family: string | undefined) {
-  preferredTerminalFont = family?.trim() ?? "";
-}
-
-export function terminalFontFamily(preferred = preferredTerminalFont) {
-  const want = preferred.trim().toLowerCase() === "auto" ? "" : preferred.trim();
-  const nerd = dropWeightVariants(
-    uniqueFonts([
-      ...(want ? [want] : []),
-      ...queriedLocalNerdFonts.filter(isNerdFamily),
-      ...LOCAL_NERD_CANDIDATES.filter((name) => name !== BUNDLED_NERD_FONT),
-      BUNDLED_NERD_FONT,
-    ]),
-  );
-  return [
-    ...nerd.map((family) => `"${family}"`),
-    "Cascadia Code",
-    "Cascadia Mono",
-    "Consolas",
-    '"Microsoft YaHei Mono"',
-    '"Microsoft YaHei"',
-    "monospace",
-  ].join(", ");
-}
-
-export function applyRegisteredTerminalFont(preferred?: string) {
-  if (preferred !== undefined) setPreferredTerminalFont(preferred);
-  const family = terminalFontFamily();
-  for (const entry of registry.values()) {
-    entry.term.options.fontFamily = family;
-    refreshWhenFontsReady(entry.term);
-  }
-}
-
-function refreshWhenFontsReady(term: Terminal) {
-  const primary = terminalFontFamily().split(",")[0]?.replace(/"/g, "").trim() ?? BUNDLED_NERD_FONT;
-  const redraw = () => {
-    try {
-      term.refresh(0, Math.max(0, term.rows - 1));
-    } catch {
-      // terminal not opened yet
-    }
-  };
-  void document.fonts.load(`13px "${primary}"`).then(redraw);
-  void document.fonts.ready.then(redraw);
-}
-
 function bindOscColorQuery(sessionId: string, term: Terminal, theme: XtermTheme): IDisposable[] {
   const reply = (code: number, color: string) => {
     void ptyWrite(sessionId, `\x1b]${code};${hexToOscRgb(color)}\x1b\\`).catch(() => undefined);
@@ -170,6 +38,19 @@ function bindOscColorQuery(sessionId: string, term: Terminal, theme: XtermTheme)
       return true;
     });
   return [handle(10, theme.foreground), handle(11, theme.background)];
+}
+
+function refreshWhenFontsReady(term: Terminal) {
+  const primary = primaryTerminalFont();
+  const redraw = () => {
+    try {
+      term.refresh(0, Math.max(0, term.rows - 1));
+    } catch {
+      // terminal not opened yet
+    }
+  };
+  void document.fonts.load(`13px "${primary}"`).then(redraw);
+  void document.fonts.ready.then(redraw);
 }
 
 const registry = new Map<string, RegistryEntry>();
@@ -397,6 +278,15 @@ export function getOrCreateTerminal(sessionId: string): RegistryEntry {
   const entry = buildTerminal(sessionId);
   openAndRegister(entry);
   return entry;
+}
+
+export function applyRegisteredTerminalFont(preferred?: string) {
+  if (preferred !== undefined) setPreferredTerminalFont(preferred);
+  const family = terminalFontFamily();
+  for (const entry of registry.values()) {
+    entry.term.options.fontFamily = family;
+    refreshWhenFontsReady(entry.term);
+  }
 }
 
 export function applyRegisteredXtermTheme(theme: string) {

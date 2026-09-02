@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::Path;
+use std::sync::OnceLock;
 use std::time::SystemTime;
 
 use serde::Deserialize;
@@ -21,6 +22,34 @@ struct Found {
     updated_ms: u64,
 }
 
+#[derive(Debug, Deserialize)]
+struct ProtocolFile {
+    agents: Vec<AgentSpec>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AgentSpec {
+    bins: Vec<String>,
+    resume: String,
+    discover: Option<String>,
+}
+
+fn protocols() -> &'static [AgentSpec] {
+    static PROTOCOLS: OnceLock<Vec<AgentSpec>> = OnceLock::new();
+    PROTOCOLS.get_or_init(|| {
+        let raw: ProtocolFile = serde_json::from_str(include_str!("../../src/lib/agent-protocol.json"))
+            .expect("agent-protocol.json must parse");
+        raw.agents
+    })
+}
+
+fn spec_for(command: &str) -> Option<&'static AgentSpec> {
+    let bin = agent_bin(command);
+    protocols()
+        .iter()
+        .find(|spec| spec.bins.iter().any(|name| name == &bin))
+}
+
 fn agent_bin(command: &str) -> String {
     command
         .trim()
@@ -36,18 +65,14 @@ fn agent_bin(command: &str) -> String {
         .to_ascii_lowercase()
 }
 
-#[cfg(test)]
+#[cfg_attr(not(test), allow(dead_code))]
 fn resume_args(command: &str, session_id: &str) -> Vec<String> {
     if session_id.trim().is_empty() {
         return Vec::new();
     }
-    match agent_bin(command).as_str() {
-        "cursor-agent" | "agent" | "claude" | "dsh-tui" | "dst" => {
-            vec!["--resume".into(), session_id.to_string()]
-        }
-        "opencode" => vec!["--session".into(), session_id.to_string()],
-        _ => Vec::new(),
-    }
+    spec_for(command)
+        .map(|spec| vec![spec.resume.clone(), session_id.to_string()])
+        .unwrap_or_default()
 }
 
 fn normalize_path(path: &str) -> String {
@@ -191,14 +216,14 @@ fn discover_claude(projects_root: &Path, cwd: &str) -> Option<String> {
 
 pub fn discover_latest(command: &str, cwd: &str) -> Option<String> {
     let home = dirs::home_dir()?;
-    match agent_bin(command).as_str() {
-        "cursor-agent" | "agent" => {
+    match spec_for(command).and_then(|spec| spec.discover.as_deref()) {
+        Some("cursor") => {
             let from_chats = discover_cursor_chats(&home.join(".cursor").join("chats"), cwd);
             let from_transcripts =
                 discover_cursor_transcripts(&home.join(".cursor").join("projects"), cwd);
             from_chats.or(from_transcripts)
         }
-        "claude" => discover_claude(&home.join(".claude").join("projects"), cwd),
+        Some("claude") => discover_claude(&home.join(".claude").join("projects"), cwd),
         _ => None,
     }
 }
@@ -234,6 +259,12 @@ mod tests {
         assert_eq!(resume_args("opencode", "s1"), vec!["--session", "s1"]);
         assert_eq!(resume_args("dsh-tui", "sess"), vec!["--resume", "sess"]);
         assert_eq!(resume_args("dst", "sess"), vec!["--resume", "sess"]);
+        assert!(resume_args("mystery", "s1").is_empty());
+        assert_eq!(
+            spec_for("cursor-agent").and_then(|s| s.discover.clone()).as_deref(),
+            Some("cursor")
+        );
+        assert_eq!(spec_for("opencode").and_then(|s| s.discover.clone()), None);
     }
 
     #[test]

@@ -45,24 +45,6 @@ export function parseSessionId(id: string): ParsedSessionId | null {
   return { projectId, kind, paneId };
 }
 
-export function resumeArgsForSession(command: string, sessionId: string | null | undefined): string[] {
-  if (!sessionId?.trim()) return [];
-  const bin =
-    command
-      .trim()
-      .split(/\s+/)[0]
-      ?.replace(/\\/g, "/")
-      .split("/")
-      .pop()
-      ?.replace(/\.(exe|cmd)$/i, "")
-      .toLowerCase() ?? "";
-  if (bin === "cursor-agent" || bin === "agent" || bin === "claude" || bin === "dsh-tui" || bin === "dst") {
-    return ["--resume", sessionId];
-  }
-  if (bin === "opencode") return ["--session", sessionId];
-  return [];
-}
-
 export function normalizeFsPath(path: string) {
   return path.replace(/\\/g, "/").replace(/\/+$/, "");
 }

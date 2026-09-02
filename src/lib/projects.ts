@@ -18,6 +18,10 @@ export function nextWorkingId(projects: Project[], exceptId?: string | null): st
   return workingProjects(projects).find((project) => project.id !== exceptId)?.id ?? null;
 }
 
+export function ensureOpened(openedIds: string[], id: string): string[] {
+  return openedIds.includes(id) ? openedIds : [...openedIds, id];
+}
+
 export function placeProject(
   projects: Project[],
   fromId: string,

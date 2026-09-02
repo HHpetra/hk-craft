@@ -9,11 +9,10 @@ import { usePtyStatusListener } from "./hooks/usePtyStatusListener";
 import { useAgentSessionCapture } from "./hooks/useAgentSessionCapture";
 import { applyDocumentTheme } from "./lib/theme";
 import { usePathDropListeners } from "./lib/dnd";
+import { discoverLocalNerdFonts, setPreferredTerminalFont } from "./lib/terminalFonts";
 import {
   applyRegisteredTerminalFont,
-  discoverLocalNerdFonts,
   ensurePtyOutputListener,
-  setPreferredTerminalFont,
 } from "./lib/termRegistry";
 import { useWorkspace } from "./store/workspace";
 
