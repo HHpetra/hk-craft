@@ -41,6 +41,8 @@ describe("agent protocol table", () => {
     expect(resumeArgsForSession("dsh-tui", "sess")).toEqual(["--resume", "sess"]);
     expect(resumeArgsForSession("dst", "sess")).toEqual(["--resume", "sess"]);
     expect(resumeArgsForSession("opencode", "s1")).toEqual(["--session", "s1"]);
+    expect(resumeArgsForSession("codex", "019d-abc")).toEqual(["resume", "019d-abc"]);
+    expect(resumeArgsForSession(String.raw`C:\bin\codex.exe`, "s1")).toEqual(["resume", "s1"]);
     expect(resumeArgsForSession("mystery", "s1")).toEqual([]);
     expect(resumeArgsForSession("cursor-agent", "  ")).toEqual([]);
   });

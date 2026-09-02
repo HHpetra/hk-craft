@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::sync::OnceLock;
 use std::time::SystemTime;
@@ -214,6 +215,76 @@ fn discover_claude(projects_root: &Path, cwd: &str) -> Option<String> {
     best.map(|f| f.id)
 }
 
+#[derive(Deserialize)]
+struct CodexLine {
+    #[serde(rename = "type")]
+    kind: Option<String>,
+    payload: Option<CodexPayload>,
+}
+
+#[derive(Deserialize)]
+struct CodexPayload {
+    id: Option<String>,
+    session_id: Option<String>,
+    cwd: Option<String>,
+}
+
+fn walk_files(dir: &Path, visit: &mut impl FnMut(&Path)) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            walk_files(&path, visit);
+        } else {
+            visit(&path);
+        }
+    }
+}
+
+fn read_codex_meta(path: &Path) -> Option<(String, String)> {
+    let file = fs::File::open(path).ok()?;
+    let mut first = String::new();
+    BufReader::new(file).read_line(&mut first).ok()?;
+    let line: CodexLine = serde_json::from_str(first.trim()).ok()?;
+    if line.kind.as_deref() != Some("session_meta") {
+        return None;
+    }
+    let payload = line.payload?;
+    let id = payload
+        .id
+        .or(payload.session_id)
+        .filter(|value| !value.is_empty())?;
+    let cwd = payload.cwd.filter(|value| !value.is_empty())?;
+    Some((id, cwd))
+}
+
+pub fn discover_codex(sessions_root: &Path, cwd: &str) -> Option<String> {
+    let mut best: Option<Found> = None;
+    walk_files(sessions_root, &mut |path| {
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        if !name.starts_with("rollout-") || !name.ends_with(".jsonl") {
+            return;
+        }
+        let Some((id, meta_cwd)) = read_codex_meta(path) else {
+            return;
+        };
+        if !paths_match(&meta_cwd, cwd) {
+            return;
+        }
+        consider(&mut best, id, file_mtime_ms(path));
+    });
+    best.map(|f| f.id)
+}
+
+fn codex_sessions_dir(home: &Path) -> std::path::PathBuf {
+    std::env::var_os("CODEX_HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| home.join(".codex"))
+        .join("sessions")
+}
+
 pub fn discover_latest(command: &str, cwd: &str) -> Option<String> {
     let home = dirs::home_dir()?;
     match spec_for(command).and_then(|spec| spec.discover.as_deref()) {
@@ -224,6 +295,7 @@ pub fn discover_latest(command: &str, cwd: &str) -> Option<String> {
             from_chats.or(from_transcripts)
         }
         Some("claude") => discover_claude(&home.join(".claude").join("projects"), cwd),
+        Some("codex") => discover_codex(&codex_sessions_dir(&home), cwd),
         _ => None,
     }
 }
@@ -257,6 +329,7 @@ mod tests {
             vec!["--resume", "abc"]
         );
         assert_eq!(resume_args("opencode", "s1"), vec!["--session", "s1"]);
+        assert_eq!(resume_args("codex", "019d-abc"), vec!["resume", "019d-abc"]);
         assert_eq!(resume_args("dsh-tui", "sess"), vec!["--resume", "sess"]);
         assert_eq!(resume_args("dst", "sess"), vec!["--resume", "sess"]);
         assert!(resume_args("mystery", "s1").is_empty());
@@ -264,7 +337,36 @@ mod tests {
             spec_for("cursor-agent").and_then(|s| s.discover.clone()).as_deref(),
             Some("cursor")
         );
+        assert_eq!(spec_for("codex").and_then(|s| s.discover.clone()).as_deref(), Some("codex"));
         assert_eq!(spec_for("opencode").and_then(|s| s.discover.clone()), None);
+    }
+
+    #[test]
+    fn codex_rollouts_pick_latest_for_cwd() {
+        let root = std::env::temp_dir().join(format!("aw-codex-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let old_dir = root.join("2026").join("09").join("01");
+        let new_dir = root.join("2026").join("09").join("02");
+        fs::create_dir_all(&old_dir).unwrap();
+        fs::create_dir_all(&new_dir).unwrap();
+        fs::write(
+            old_dir.join("rollout-2026-09-01T00-00-00-old-id.jsonl"),
+            r#"{"type":"session_meta","payload":{"id":"old-id","cwd":"C:\\work\\app"}}"#,
+        )
+        .unwrap();
+        fs::write(
+            new_dir.join("rollout-2026-09-02T00-00-00-other-id.jsonl"),
+            r#"{"type":"session_meta","payload":{"id":"other-id","cwd":"C:\\work\\other"}}"#,
+        )
+        .unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        fs::write(
+            new_dir.join("rollout-2026-09-02T12-00-00-new-id.jsonl"),
+            r#"{"type":"session_meta","payload":{"id":"new-id","cwd":"C:\\work\\app"}}"#,
+        )
+        .unwrap();
+        assert_eq!(discover_codex(&root, r"C:\work\app").as_deref(), Some("new-id"));
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

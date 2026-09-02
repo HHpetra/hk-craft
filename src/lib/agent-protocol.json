@@ -2,6 +2,7 @@
   "agents": [
     { "bins": ["cursor-agent", "agent"], "resume": "--resume", "discover": "cursor" },
     { "bins": ["claude"], "resume": "--resume", "discover": "claude" },
+    { "bins": ["codex"], "resume": "resume", "discover": "codex" },
     { "bins": ["dsh-tui", "dst"], "resume": "--resume" },
     { "bins": ["opencode"], "resume": "--session" }
   ]

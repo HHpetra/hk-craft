@@ -19,7 +19,7 @@
 
 ## 💡 为什么需要 HK-Craft？
 
-在日常使用 `cursor-agent`、`opencode`、`claude`、`dsh-tui` 等现代 AI 编程 CLI 时，开发者常常面临两个痛点：
+在日常使用 `cursor-agent`、`opencode`、`claude`、`codex`、`dsh-tui` 等现代 AI 编程 CLI 时，开发者常常面临两个痛点：
 1. **不想为了简单交互开一整套沉重繁琐的 IDE**；
 2. **在杂乱的系统终端标签页里，经常分不清哪个是正在思考的 Agent、哪个是跑着测试的 dev server**，且经常因为不小心切错窗口或误关终端中断会话。
 
@@ -59,7 +59,7 @@
 
 ### 系统要求
 - **Windows**: Windows 10 / 11 (已内置 WebView2)
-- **依赖工具**: 本机已安装您常用的 Agent CLI（如 `cursor-agent`、`opencode`、`claude`、`dsh-tui` 等）
+- **依赖工具**: 本机已安装您常用的 Agent CLI（如 `cursor-agent`、`opencode`、`claude`、`codex`、`dsh-tui` 等）
 
 ### 下载安装
 前往 [GitHub Releases](https://github.com/hongshan-tech/hk-craft/releases) 下载最新版本的安装包：

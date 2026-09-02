@@ -217,6 +217,7 @@ fn default_presets() -> Vec<AgentPreset> {
             command: "claude".into(),
             drag_prefix: "@".into(),
         },
+        codex_preset(),
         dsh_tui_preset(),
     ]
 }
@@ -226,6 +227,15 @@ fn dsh_tui_preset() -> AgentPreset {
         id: "dsh-tui".into(),
         name: "DeepSeek Harness TUI".into(),
         command: "dsh-tui".into(),
+        drag_prefix: "@".into(),
+    }
+}
+
+fn codex_preset() -> AgentPreset {
+    AgentPreset {
+        id: "codex".into(),
+        name: "Codex".into(),
+        command: "codex".into(),
         drag_prefix: "@".into(),
     }
 }
@@ -259,6 +269,9 @@ impl AppConfig {
         self.agent_presets.retain(|preset| preset.id != "aider");
         if !self.agent_presets.iter().any(|preset| preset.id == "dsh-tui") {
             self.agent_presets.push(dsh_tui_preset());
+        }
+        if !self.agent_presets.iter().any(|preset| preset.id == "codex") {
+            self.agent_presets.push(codex_preset());
         }
         let fallback = fallback_preset_id(&self.agent_presets);
         if self.settings.default_split_ratio.len() != 3 {
@@ -367,9 +380,11 @@ mod tests {
     #[test]
     fn default_config_has_presets_and_split() {
         let cfg = AppConfig::default();
-        assert_eq!(cfg.agent_presets.len(), 4);
-        assert_eq!(cfg.agent_presets[3].id, "dsh-tui");
-        assert_eq!(cfg.agent_presets[3].command, "dsh-tui");
+        assert_eq!(cfg.agent_presets.len(), 5);
+        assert_eq!(cfg.agent_presets[3].id, "codex");
+        assert_eq!(cfg.agent_presets[3].command, "codex");
+        assert_eq!(cfg.agent_presets[4].id, "dsh-tui");
+        assert_eq!(cfg.agent_presets[4].command, "dsh-tui");
         assert_eq!(cfg.settings.theme, "dark");
         assert_eq!(cfg.settings.explorer_view, "list");
         assert_eq!(cfg.settings.default_split_ratio, vec![30.0, 40.0, 30.0]);
@@ -472,6 +487,7 @@ mod tests {
         cfg.migrate();
         assert!(cfg.agent_presets.iter().all(|preset| preset.id != "aider"));
         assert!(cfg.agent_presets.iter().any(|preset| preset.id == "dsh-tui"));
+        assert!(cfg.agent_presets.iter().any(|preset| preset.id == "codex"));
         assert_eq!(cfg.projects[0].agent_preset, "cursor-agent");
         assert_eq!(
             cfg.projects[0].panes.as_ref().unwrap()[0]
@@ -484,6 +500,13 @@ mod tests {
             cfg.agent_presets
                 .iter()
                 .filter(|preset| preset.id == "dsh-tui")
+                .count(),
+            1
+        );
+        assert_eq!(
+            cfg.agent_presets
+                .iter()
+                .filter(|preset| preset.id == "codex")
                 .count(),
             1
         );

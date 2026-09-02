@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Trinity Workspace Architecture**:
   - Integrated GUI File Explorer with breadcrumbs, bookmarks, quick filter, and detail/icon views.
-  - Dedicated Agent CLI terminal supporting `cursor-agent`, `opencode`, `claude`, `dsh-tui`, and customizable presets.
+  - Dedicated Agent CLI terminal supporting `cursor-agent`, `opencode`, `claude`, `codex`, `dsh-tui`, and customizable presets.
   - Runner terminal with project-scoped Quick Command Bar for rapid test and build execution.
 - **PTY Session Persistence**:
   - Native cross-platform PTY background lifecycle powered by Rust `portable-pty`.
