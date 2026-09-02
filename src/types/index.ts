@@ -40,6 +40,12 @@ export interface WorkspacePane {
   agent_session_id?: string | null;
 }
 
+export interface QuickCommand {
+  id: string;
+  name: string;
+  command: string;
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -51,6 +57,7 @@ export interface Project {
   active_pane_id: string | null;
   panes: WorkspacePane[];
   stowed?: boolean;
+  quick_commands?: QuickCommand[];
 }
 
 export interface AppConfig {

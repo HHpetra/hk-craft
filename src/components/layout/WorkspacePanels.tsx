@@ -1,6 +1,7 @@
 import type { DragEvent, ReactNode } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import { FileExplorer } from "../explorer/FileExplorer";
+import { RunnerQuickBar } from "../terminal/RunnerQuickBar";
 import { TerminalPane } from "../terminal/TerminalPane";
 import { cn, sessionId } from "../../lib/format";
 import { commitPathDrop, noteDropHover, usePathDrag } from "../../lib/dnd";
@@ -40,18 +41,21 @@ function TerminalHost({
   }
 
   return (
-    <div data-drop-session={sid} className="relative h-full w-full bg-surface-term">
-      <TerminalPane sessionId={sid} kind={kind} interactive={interactive} />
-      <div
-        className={cn(
-          "absolute inset-0 z-30 rounded-sm border-2",
-          dragging && interactive
-            ? "pointer-events-auto border-sky-400/70 bg-sky-400/10"
-            : "pointer-events-none border-transparent",
-        )}
-        onDragOver={onDragOver}
-        onDrop={onDrop}
-      />
+    <div data-drop-session={sid} className="flex h-full w-full flex-col bg-surface-term">
+      <div className="relative min-h-0 flex-1">
+        <TerminalPane sessionId={sid} kind={kind} interactive={interactive} />
+        <div
+          className={cn(
+            "absolute inset-0 z-30 rounded-sm border-2",
+            dragging && interactive
+              ? "pointer-events-auto border-sky-400/70 bg-sky-400/10"
+              : "pointer-events-none border-transparent",
+          )}
+          onDragOver={onDragOver}
+          onDrop={onDrop}
+        />
+      </div>
+      {kind === "runner" && <RunnerQuickBar sessionId={sid} />}
     </div>
   );
 }

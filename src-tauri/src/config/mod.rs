@@ -65,6 +65,13 @@ pub struct WorkspacePane {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct QuickCommand {
+    pub id: String,
+    pub name: String,
+    pub command: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Project {
     #[serde(default)]
     pub id: String,
@@ -84,6 +91,8 @@ pub struct Project {
     pub panes: Option<Vec<WorkspacePane>>,
     #[serde(default, skip_serializing_if = "is_false")]
     pub stowed: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub quick_commands: Vec<QuickCommand>,
 }
 
 impl Default for Project {
@@ -99,6 +108,7 @@ impl Default for Project {
             active_pane_id: None,
             panes: None,
             stowed: false,
+            quick_commands: Vec::new(),
         }
     }
 }
@@ -503,5 +513,45 @@ stowed = true
         assert!(stowed.stowed);
         let stowed_body = toml::to_string(&stowed).expect("serialize stowed");
         assert!(stowed_body.contains("stowed = true"));
+    }
+
+    #[test]
+    fn quick_commands_default_empty_and_skip_toml() {
+        let project = Project {
+            id: "p1".into(),
+            name: "demo".into(),
+            path: "C:/tmp".into(),
+            ..Project::default()
+        };
+        assert!(project.quick_commands.is_empty());
+        let body = toml::to_string(&project).expect("serialize project");
+        assert!(!body.contains("quick_commands"));
+
+        let parsed: Project = toml::from_str(
+            r#"
+name = "demo"
+path = "C:/tmp"
+"#,
+        )
+        .expect("parse project");
+        assert!(parsed.quick_commands.is_empty());
+
+        let with_cmds: Project = toml::from_str(
+            r#"
+name = "demo"
+path = "C:/tmp"
+
+[[quick_commands]]
+id = "qc-1"
+name = "build"
+command = "pnpm tauri build"
+"#,
+        )
+        .expect("parse quick commands");
+        assert_eq!(with_cmds.quick_commands.len(), 1);
+        assert_eq!(with_cmds.quick_commands[0].name, "build");
+        let cmds_body = toml::to_string(&with_cmds).expect("serialize commands");
+        assert!(cmds_body.contains("quick_commands"));
+        assert!(cmds_body.contains("pnpm tauri build"));
     }
 }

@@ -64,6 +64,10 @@ interface WorkspaceState {
   addPane: (kind: PaneKind, presetId?: string) => Promise<void>;
   closePane: (paneId: string) => Promise<void>;
   reorderPanes: (fromId: string, toIndex: number) => Promise<void>;
+  addQuickCommand: (name: string, command: string) => Promise<void>;
+  updateQuickCommand: (id: string, name: string, command: string) => Promise<void>;
+  removeQuickCommand: (id: string) => Promise<void>;
+  reorderQuickCommands: (fromId: string, toIndex: number) => Promise<void>;
   setLayout: (layout: WorkspaceLayout) => Promise<void>;
   setActivePane: (paneId: string) => Promise<void>;
   spawnForProject: (project: Project) => Promise<void>;
@@ -440,6 +444,74 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
         config: s.config
           ? patchProject(s.config, activeProjectId, { panes: prev })
           : patchProject(config, activeProjectId, { panes: prev }),
+      }));
+    }
+  },
+
+  addQuickCommand: async (name, command) => {
+    const { config, activeProjectId } = get();
+    if (!config || !activeProjectId) return;
+    const project = config.projects.find((item) => item.id === activeProjectId);
+    if (!project) return;
+    const label = name.trim();
+    const body = command.trim();
+    if (!label || !body) return;
+    const quick_commands = [
+      ...(project.quick_commands ?? []),
+      { id: crypto.randomUUID(), name: label, command: body },
+    ];
+    await get().persist(patchProject(config, activeProjectId, { quick_commands }));
+  },
+
+  updateQuickCommand: async (id, name, command) => {
+    const { config, activeProjectId } = get();
+    if (!config || !activeProjectId) return;
+    const project = config.projects.find((item) => item.id === activeProjectId);
+    if (!project) return;
+    const label = name.trim();
+    const body = command.trim();
+    if (!label || !body) return;
+    const prev = project.quick_commands ?? [];
+    if (!prev.some((item) => item.id === id)) return;
+    const quick_commands = prev.map((item) =>
+      item.id === id ? { ...item, name: label, command: body } : item,
+    );
+    await get().persist(patchProject(config, activeProjectId, { quick_commands }));
+  },
+
+  removeQuickCommand: async (id) => {
+    const { config, activeProjectId } = get();
+    if (!config || !activeProjectId) return;
+    const project = config.projects.find((item) => item.id === activeProjectId);
+    if (!project) return;
+    const prev = project.quick_commands ?? [];
+    if (!prev.some((item) => item.id === id)) return;
+    const quick_commands = prev.filter((item) => item.id !== id);
+    await get().persist(patchProject(config, activeProjectId, { quick_commands }));
+  },
+
+  reorderQuickCommands: async (fromId, toIndex) => {
+    const { config, activeProjectId } = get();
+    if (!config || !activeProjectId) return;
+    const project = config.projects.find((item) => item.id === activeProjectId);
+    if (!project) return;
+    const prev = project.quick_commands ?? [];
+    const fromIndex = prev.findIndex((item) => item.id === fromId);
+    if (fromIndex < 0 || prev.length === 0) return;
+    const clamped = Math.max(0, Math.min(toIndex, prev.length - 1));
+    if (fromIndex === clamped) return;
+    const quick_commands = [...prev];
+    const [moved] = quick_commands.splice(fromIndex, 1);
+    if (!moved) return;
+    quick_commands.splice(clamped, 0, moved);
+    const next = patchProject(config, activeProjectId, { quick_commands });
+    set({ config: next });
+    const saved = await get().persist(next);
+    if (!saved) {
+      set((s) => ({
+        config: s.config
+          ? patchProject(s.config, activeProjectId, { quick_commands: prev })
+          : patchProject(config, activeProjectId, { quick_commands: prev }),
       }));
     }
   },
