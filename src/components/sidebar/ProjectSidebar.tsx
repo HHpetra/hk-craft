@@ -1,5 +1,6 @@
 import { CircleStop, Folder, Plus, Settings, X } from "lucide-react";
-import { cn, sessionId } from "../../lib/format";
+import { cn } from "../../lib/format";
+import { paneSessionId, terminalPanes } from "../../lib/panes";
 import { projectBadge } from "../../lib/status";
 import { useWorkspace } from "../../store/workspace";
 import { StatusDot } from "../ui/StatusDot";
@@ -26,8 +27,7 @@ export function ProjectSidebar() {
         )}
         {projects.map((project) => {
           const badge = projectBadge(
-            status[sessionId(project.id, "agent")],
-            status[sessionId(project.id, "runner")],
+            ...terminalPanes(project).map((pane) => status[paneSessionId(project.id, pane) ?? ""]),
           );
           const active = project.id === activeId;
           const opened = openedProjectIds.includes(project.id);

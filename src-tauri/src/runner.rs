@@ -4,14 +4,26 @@ use std::path::{Path, PathBuf};
 use crate::config;
 use crate::error::{AppError, AppResult};
 
+pub fn parse_session_id(session_id: &str) -> Option<(&str, &str, &str)> {
+    let mut parts = session_id.splitn(3, ':');
+    let project_id = parts.next()?;
+    let kind = parts.next()?;
+    let pane_id = parts.next()?;
+    if project_id.is_empty() || kind.is_empty() || pane_id.is_empty() {
+        return None;
+    }
+    Some((project_id, kind, pane_id))
+}
+
 pub fn is_runner_session(session_id: &str) -> bool {
-    session_id.ends_with(":runner")
+    matches!(parse_session_id(session_id), Some((_, "runner", _)))
 }
 
 pub fn runner_project_id(session_id: &str) -> Option<&str> {
-    session_id
-        .strip_suffix(":runner")
-        .filter(|id| is_safe_project_id(id))
+    match parse_session_id(session_id) {
+        Some((id, "runner", _)) if is_safe_project_id(id) => Some(id),
+        _ => None,
+    }
 }
 
 pub fn is_safe_project_id(id: &str) -> bool {
@@ -84,14 +96,15 @@ mod tests {
     #[test]
     fn runner_session_maps_to_project_id() {
         assert_eq!(
-            runner_project_id("a1b2c3d4-e5f6-7890-abcd-ef1234567890:runner"),
+            runner_project_id("a1b2c3d4-e5f6-7890-abcd-ef1234567890:runner:pane-1"),
             Some("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
         );
-        assert!(is_runner_session("abc:runner"));
-        assert!(!is_runner_session("abc:agent"));
-        assert_eq!(runner_project_id("abc:agent"), None);
-        assert_eq!(runner_project_id("../evil:runner"), None);
-        assert_eq!(runner_project_id("a/b:runner"), None);
+        assert!(is_runner_session("abc:runner:pane-1"));
+        assert!(!is_runner_session("abc:agent:pane-1"));
+        assert!(!is_runner_session("abc:runner"));
+        assert_eq!(runner_project_id("abc:agent:pane-1"), None);
+        assert_eq!(runner_project_id("../evil:runner:pane-1"), None);
+        assert_eq!(runner_project_id("a/b:runner:pane-1"), None);
     }
 
     #[test]
@@ -112,7 +125,8 @@ mod tests {
 
     #[test]
     fn agent_session_has_no_history_path() {
-        assert!(history_path_for_session("abc:agent").unwrap().is_none());
+        assert!(history_path_for_session("abc:agent:pane-1").unwrap().is_none());
+        assert!(history_path_for_session("abc:runner").unwrap().is_none());
         assert!(history_path_for_session("not-a-runner").unwrap().is_none());
     }
 

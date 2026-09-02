@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { cn } from "../../lib/format";
+import { cn, parseSessionId } from "../../lib/format";
 import {
   fitAndResize,
   getOrCreateTerminal,
@@ -19,7 +19,7 @@ interface TerminalPaneProps {
 export function TerminalPane({ sessionId, kind, interactive }: TerminalPaneProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const status = useWorkspace((s) => s.sessionStatus[sessionId] ?? "idle");
-  const restartSession = useWorkspace((s) => s.restartSession);
+  const restartPane = useWorkspace((s) => s.restartPane);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -48,17 +48,17 @@ export function TerminalPane({ sessionId, kind, interactive }: TerminalPaneProps
     };
   }, [sessionId, kind, interactive]);
 
-  const projectId = sessionId.split(":")[0];
+  const parsed = parseSessionId(sessionId);
 
   return (
     <div className={cn("relative h-full w-full", !interactive && "pointer-events-none")}>
       <div ref={containerRef} className="h-full w-full" />
-      {(status === "exited" || status === "error") && (
+      {(status === "exited" || status === "error") && parsed && (
         <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/55">
           <button
             type="button"
             className="rounded-md bg-btn px-3 py-1.5 text-btn-fg hover:opacity-90"
-            onClick={() => void restartSession(projectId, kind)}
+            onClick={() => void restartPane(parsed.projectId, parsed.paneId)}
           >
             重新启动
           </button>

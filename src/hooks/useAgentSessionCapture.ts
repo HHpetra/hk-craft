@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { discoverAgentSession } from "../lib/api";
-import { sessionId } from "../lib/format";
+import { paneSessionId } from "../lib/panes";
 import { useWorkspace } from "../store/workspace";
 
 const POLL_MS = 2500;
@@ -20,16 +20,19 @@ export function useAgentSessionCapture() {
       for (const projectId of openedProjectIds) {
         const project = config.projects.find((p) => p.id === projectId);
         if (!project) continue;
-        const agentStatus = sessionStatus[sessionId(projectId, "agent")];
-        if (agentStatus !== "running" && agentStatus !== "waiting") continue;
-        const preset = config.agent_presets.find((p) => p.id === project.agent_preset);
-        const command = preset?.command ?? "cursor-agent";
-        try {
-          const found = await discoverAgentSession(command, project.path);
-          if (cancelled || !found) continue;
-          await rememberAgentSession(projectId, found);
-        } catch {
-          // ignore
+        for (const pane of project.panes.filter((item) => item.kind === "agent")) {
+          const sid = paneSessionId(projectId, pane);
+          const agentStatus = sid ? sessionStatus[sid] : undefined;
+          if (agentStatus !== "running" && agentStatus !== "waiting") continue;
+          const preset = config.agent_presets.find((p) => p.id === (pane.preset_id ?? project.agent_preset));
+          const command = preset?.command ?? "cursor-agent";
+          try {
+            const found = await discoverAgentSession(command, project.path);
+            if (cancelled || !found) continue;
+            await rememberAgentSession(projectId, pane.id, found);
+          } catch {
+            // ignore
+          }
         }
       }
     }

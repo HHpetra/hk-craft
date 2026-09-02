@@ -1,6 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { useEffect } from "react";
 import type { PtyExit, PtyOutput, SessionStatus } from "../types";
+import { parseSessionId } from "../lib/format";
 import { notifyTaskDone } from "../lib/notify";
 import { sessionKindLabel } from "../lib/status";
 import { isCurrentGeneration } from "../lib/termRegistry";
@@ -34,12 +35,11 @@ function clearTimer(track: Track) {
 }
 
 function kindFromSession(sessionId: string): "agent" | "runner" {
-  return sessionId.endsWith(":runner") ? "runner" : "agent";
+  return parseSessionId(sessionId)?.kind ?? "agent";
 }
 
 function projectIdFromSession(sessionId: string) {
-  const sep = sessionId.lastIndexOf(":");
-  return sep === -1 ? sessionId : sessionId.slice(0, sep);
+  return parseSessionId(sessionId)?.projectId ?? sessionId;
 }
 
 function isOpenedSession(sessionId: string) {

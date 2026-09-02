@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { commitPathDrop, injectDroppedPaths, kindAtPoint, peekPathDrag } from "../lib/dnd";
-import { useWorkspace } from "../store/workspace";
+import { commitPathDrop, injectDroppedPaths, peekPathDrag, sessionAtPoint } from "../lib/dnd";
+import { parseSessionId } from "../lib/format";
 
 export function useOsFileDrop() {
   useEffect(() => {
@@ -16,23 +16,16 @@ export function useOsFileDrop() {
           typeof position.toLogical === "function" ? position.toLogical(factor) : null;
         const x = logical ? logical.x : position.x / factor;
         const y = logical ? logical.y : position.y / factor;
-        const kind = kindAtPoint(x, y);
+        const session = sessionAtPoint(x, y);
 
         if (osPaths.length) {
-          const projectId = useWorkspace.getState().activeProjectId;
-          if (!projectId || (kind !== "agent" && kind !== "runner")) return;
-          const project = useWorkspace
-            .getState()
-            .config?.projects.find((p) => p.id === projectId);
-          const preset = useWorkspace
-            .getState()
-            .config?.agent_presets.find((p) => p.id === project?.agent_preset);
-          injectDroppedPaths(projectId, kind, osPaths, preset?.drag_prefix ?? "@");
+          if (!session || !parseSessionId(session)) return;
+          injectDroppedPaths(session, osPaths);
           return;
         }
 
         if (peekPathDrag()?.length) {
-          commitPathDrop(kind);
+          commitPathDrop(session);
         }
       })
       .then((fn) => {

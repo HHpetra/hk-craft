@@ -1,7 +1,17 @@
 import { create } from "zustand";
-import type { AppConfig, ExplorerView, Project, SessionStatus, SpawnOpts, SpawnResult, ViewMode } from "../types";
+import type {
+  AppConfig,
+  ExplorerView,
+  PaneKind,
+  Project,
+  SessionStatus,
+  SpawnOpts,
+  SpawnResult,
+  WorkspaceLayout,
+} from "../types";
 import { checkDir, deleteRunnerPersist, discoverAgentSession, loadConfig, ptyKill, ptySpawn, saveConfig } from "../lib/api";
-import { pathsEqual, resumeArgsForSession, sessionId } from "../lib/format";
+import { pathsEqual, resumeArgsForSession } from "../lib/format";
+import { createPane, neighborPaneId, normalizeLayout, paneSessionId, terminalPanes, withDefaultWorkspace } from "../lib/panes";
 import { applyDocumentTheme, normalizeTheme } from "../lib/theme";
 import {
   applyRegisteredTerminalFont,
@@ -23,8 +33,6 @@ interface WorkspaceState {
   config: AppConfig | null;
   loading: boolean;
   notice: string | null;
-  viewMode: ViewMode;
-  splitRatio: [number, number, number];
   activeProjectId: string | null;
   openedProjectIds: string[];
   sessionStatus: SessionMap;
@@ -33,9 +41,6 @@ interface WorkspaceState {
   bootstrap: () => Promise<void>;
   persist: (next: AppConfig) => Promise<boolean>;
   setNotice: (notice: string | null) => void;
-  setViewMode: (mode: ViewMode) => void;
-  setSplitRatio: (ratio: [number, number, number]) => void;
-  persistSplitRatio: () => Promise<void>;
   setSessionStatus: (id: string, status: SessionStatus) => void;
   setSettingsOpen: (open: boolean) => void;
   setProjectDialogOpen: (open: boolean) => void;
@@ -44,9 +49,13 @@ interface WorkspaceState {
   closeProject: (id: string) => Promise<void>;
   removeProject: (id: string) => Promise<void>;
   updateProjectPreset: (id: string, agentPreset: string) => Promise<void>;
+  addPane: (kind: PaneKind, presetId?: string) => Promise<void>;
+  closePane: (paneId: string) => Promise<void>;
+  setLayout: (layout: WorkspaceLayout) => Promise<void>;
+  setActivePane: (paneId: string) => Promise<void>;
   spawnForProject: (project: Project) => Promise<void>;
-  restartSession: (projectId: string, kind: "agent" | "runner") => Promise<void>;
-  rememberAgentSession: (projectId: string, chatId: string) => Promise<void>;
+  restartPane: (projectId: string, paneId: string) => Promise<void>;
+  rememberAgentSession: (projectId: string, paneId: string, chatId: string) => Promise<void>;
   snapshotOpenedSessions: () => Promise<void>;
   setTheme: (theme: "dark" | "light") => Promise<void>;
   setResumeOnStart: (resume: boolean) => Promise<void>;
@@ -68,11 +77,6 @@ const defaultConfig = (): AppConfig => ({
   projects: [],
 });
 
-function asRatio(values: number[] | undefined): [number, number, number] {
-  if (!values || values.length !== 3) return [30, 40, 30];
-  return [values[0], values[1], values[2]];
-}
-
 function isLive(status: SessionStatus | undefined) {
   return status === "running" || status === "waiting";
 }
@@ -91,14 +95,17 @@ async function spawnPty(opts: SpawnOpts): Promise<SpawnResult> {
   return result;
 }
 
-let splitTimer: ReturnType<typeof setTimeout> | null = null;
+function patchProject(config: AppConfig, projectId: string, patch: Partial<Project>): AppConfig {
+  return {
+    ...config,
+    projects: config.projects.map((project) => (project.id === projectId ? { ...project, ...patch } : project)),
+  };
+}
 
 export const useWorkspace = create<WorkspaceState>((set, get) => ({
   config: null,
   loading: true,
   notice: null,
-  viewMode: "tiled",
-  splitRatio: [30, 40, 30],
   activeProjectId: null,
   openedProjectIds: [],
   sessionStatus: {},
@@ -106,27 +113,8 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   projectDialogOpen: false,
 
   setNotice: (notice) => set({ notice }),
-  setViewMode: (viewMode) => set({ viewMode }),
   setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
   setProjectDialogOpen: (projectDialogOpen) => set({ projectDialogOpen }),
-
-  setSplitRatio: (splitRatio) => {
-    set({ splitRatio });
-    if (splitTimer) clearTimeout(splitTimer);
-    splitTimer = setTimeout(() => {
-      void get().persistSplitRatio();
-    }, 400);
-  },
-
-  persistSplitRatio: async () => {
-    const { config, splitRatio } = get();
-    if (!config) return;
-    const next = {
-      ...config,
-      settings: { ...config.settings, default_split_ratio: [...splitRatio] },
-    };
-    await get().persist(next);
-  },
 
   setSessionStatus: (id, status) =>
     set((s) => ({ sessionStatus: { ...s.sessionStatus, [id]: status } })),
@@ -143,7 +131,6 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
       set({
         config,
         loading: false,
-        splitRatio: asRatio(config.settings.default_split_ratio),
         activeProjectId: active,
         openedProjectIds: active ? [active] : [],
       });
@@ -217,7 +204,8 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
       set({ activeProjectId: prevActive, openedProjectIds: prevOpened });
       return;
     }
-    await get().spawnForProject(project);
+    const latest = get().config?.projects.find((p) => p.id === id) ?? project;
+    await get().spawnForProject(latest);
   },
 
   addProject: async (name, path, agentPreset) => {
@@ -231,14 +219,14 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
       set({ notice: "该目录已经是项目，无需重复添加" });
       return;
     }
-    const project: Project = {
+    const project = withDefaultWorkspace({
       id: crypto.randomUUID(),
       name: name.trim() || path,
       path: path.trim(),
       agent_preset: agentPreset,
       agent_seen: false,
       agent_session_id: null,
-    };
+    });
     const next: AppConfig = {
       ...config,
       projects: [...config.projects, project],
@@ -251,31 +239,29 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
       openedProjectIds: [...s.openedProjectIds, project.id],
       projectDialogOpen: false,
     }));
-    await get().spawnForProject(project);
+    const latest = get().config?.projects.find((p) => p.id === project.id) ?? project;
+    await get().spawnForProject(latest);
   },
 
   closeProject: async (id) => {
-    const agentId = sessionId(id, "agent");
-    const runnerId = sessionId(id, "runner");
+    const project = get().config?.projects.find((p) => p.id === id);
+    const sessions = project ? terminalPanes(project).map((pane) => paneSessionId(id, pane)).filter((sid): sid is string => Boolean(sid)) : [];
     set((s) => {
-      const sessionStatus = { ...s.sessionStatus, [agentId]: "idle" as const, [runnerId]: "idle" as const };
+      const sessionStatus = { ...s.sessionStatus };
+      for (const session of sessions) sessionStatus[session] = "idle";
       return {
         openedProjectIds: s.openedProjectIds.filter((pid) => pid !== id),
         sessionStatus,
       };
     });
-    try {
-      await ptyKill(agentId);
-    } catch {
-      // session may already be gone
+    for (const session of sessions) {
+      try {
+        await ptyKill(session);
+      } catch {
+        // session may already be gone
+      }
+      disposeTerminal(session);
     }
-    try {
-      await ptyKill(runnerId);
-    } catch {
-      // session may already be gone
-    }
-    disposeTerminal(agentId);
-    disposeTerminal(runnerId);
   },
 
   removeProject: async (id) => {
@@ -313,162 +299,212 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   updateProjectPreset: async (id, agentPreset) => {
     const { config } = get();
     if (!config) return;
-    await get().persist({
-      ...config,
-      projects: config.projects.map((p) =>
-        p.id === id ? { ...p, agent_preset: agentPreset } : p,
-      ),
-    });
+    await get().persist(patchProject(config, id, { agent_preset: agentPreset }));
+  },
+
+  addPane: async (kind, presetId) => {
+    const { config, activeProjectId } = get();
+    if (!config || !activeProjectId) return;
+    const project = config.projects.find((p) => p.id === activeProjectId);
+    if (!project) return;
+    const preset = kind === "agent" ? (presetId || project.agent_preset) : undefined;
+    const pane = createPane(kind, preset);
+    const panes = [...(project.panes ?? []), pane];
+    const saved = await get().persist(
+      patchProject(config, activeProjectId, { panes, active_pane_id: pane.id }),
+    );
+    if (!saved) return;
+    const latest = get().config?.projects.find((p) => p.id === activeProjectId);
+    if (latest) await get().spawnForProject(latest);
+  },
+
+  closePane: async (paneId) => {
+    const { config, activeProjectId } = get();
+    if (!config || !activeProjectId) return;
+    const project = config.projects.find((p) => p.id === activeProjectId);
+    if (!project) return;
+    const pane = project.panes?.find((item) => item.id === paneId);
+    if (!pane) return;
+    const session = paneSessionId(activeProjectId, pane);
+    if (session) {
+      try {
+        await ptyKill(session);
+      } catch {
+        // ignore
+      }
+      disposeTerminal(session);
+      get().setSessionStatus(session, "idle");
+    }
+    const panes = (project.panes ?? []).filter((item) => item.id !== paneId);
+    const active_pane_id =
+      project.active_pane_id === paneId ? neighborPaneId(project.panes ?? [], paneId) : project.active_pane_id;
+    await get().persist(patchProject(config, activeProjectId, { panes, active_pane_id }));
+  },
+
+  setLayout: async (layout) => {
+    const { config, activeProjectId } = get();
+    if (!config || !activeProjectId) return;
+    const project = config.projects.find((p) => p.id === activeProjectId);
+    if (!project || project.layout === layout) return;
+    await get().persist(patchProject(config, activeProjectId, { layout: normalizeLayout(layout) }));
+  },
+
+  setActivePane: async (paneId) => {
+    const { config, activeProjectId } = get();
+    if (!config || !activeProjectId) return;
+    const project = config.projects.find((p) => p.id === activeProjectId);
+    if (!project || project.active_pane_id === paneId) return;
+    if (!project.panes.some((pane) => pane.id === paneId)) return;
+    await get().persist(patchProject(config, activeProjectId, { active_pane_id: paneId }));
   },
 
   spawnForProject: async (project) => {
     const { config, setSessionStatus, setNotice } = get();
-    const preset = config?.agent_presets.find((p) => p.id === project.agent_preset);
-    const runnerId = sessionId(project.id, "runner");
-    const agentId = sessionId(project.id, "agent");
-    const command = preset?.command ?? "cursor-agent";
-    const resume =
-      config?.settings.resume_on_start !== false
-        ? resumeArgsForSession(command, project.agent_session_id)
-        : [];
-    if (!isLive(get().sessionStatus[runnerId])) {
-      try {
-        const result = await spawnPty({ sessionId: runnerId, cwd: project.path, command: "" });
-        if (!result.reused) setSessionStatus(runnerId, "running");
-      } catch (err) {
-        setSessionStatus(runnerId, "error");
-        setNotice(`Runner 启动失败：${String(err)}`);
-      }
-    }
-    if (isLive(get().sessionStatus[agentId])) return;
-    try {
-      const result = await spawnPty({
-        sessionId: agentId,
-        cwd: project.path,
-        command,
-        args: resume,
-      });
-      if (!result.reused) setSessionStatus(agentId, "running");
-      if (!project.agent_seen) {
-        const latest = get().config;
-        if (latest) {
-          void get().persist({
-            ...latest,
-            projects: latest.projects.map((p) =>
-              p.id === project.id ? { ...p, agent_seen: true } : p,
-            ),
-          });
-        }
-      }
-    } catch (err) {
-      if (resume.length > 0) {
+    if (!config) return;
+    let markedSeen = project.agent_seen;
+    for (const pane of terminalPanes(project)) {
+      const sid = paneSessionId(project.id, pane);
+      if (!sid || isLive(get().sessionStatus[sid])) continue;
+      if (pane.kind === "runner") {
         try {
-          const result = await spawnPty({
-            sessionId: agentId,
-            cwd: project.path,
-            command,
-            args: [],
-          });
-          if (!result.reused) setSessionStatus(agentId, "running");
+          const result = await spawnPty({ sessionId: sid, cwd: project.path, command: "" });
+          if (!result.reused) setSessionStatus(sid, "running");
+        } catch (err) {
+          setSessionStatus(sid, "error");
+          setNotice(`Runner 启动失败：${String(err)}`);
+        }
+        continue;
+      }
+      const preset = config.agent_presets.find((p) => p.id === (pane.preset_id ?? project.agent_preset));
+      const command = preset?.command ?? "cursor-agent";
+      const resume =
+        config.settings.resume_on_start !== false
+          ? resumeArgsForSession(command, pane.agent_session_id)
+          : [];
+      try {
+        const result = await spawnPty({
+          sessionId: sid,
+          cwd: project.path,
+          command,
+          args: resume,
+        });
+        if (!result.reused) setSessionStatus(sid, "running");
+        if (!markedSeen) {
+          markedSeen = true;
           const latest = get().config;
           if (latest) {
-            void get().persist({
-              ...latest,
-              projects: latest.projects.map((p) =>
-                p.id === project.id ? { ...p, agent_session_id: null } : p,
-              ),
-            });
+            void get().persist(patchProject(latest, project.id, { agent_seen: true }));
           }
-          return;
-        } catch (retryErr) {
-          setSessionStatus(agentId, "error");
-          setNotice(`Agent 启动失败：${String(retryErr)}`);
-          return;
         }
+      } catch (err) {
+        if (resume.length > 0) {
+          try {
+            const result = await spawnPty({
+              sessionId: sid,
+              cwd: project.path,
+              command,
+              args: [],
+            });
+            if (!result.reused) setSessionStatus(sid, "running");
+            const latest = get().config;
+            if (latest) {
+              const current = latest.projects.find((p) => p.id === project.id);
+              const panes = (current?.panes ?? project.panes).map((item) =>
+                item.id === pane.id ? { ...item, agent_session_id: null } : item,
+              );
+              void get().persist(patchProject(latest, project.id, { panes }));
+            }
+            continue;
+          } catch (retryErr) {
+            setSessionStatus(sid, "error");
+            setNotice(`Agent 启动失败：${String(retryErr)}`);
+            continue;
+          }
+        }
+        setSessionStatus(sid, "error");
+        setNotice(`Agent 启动失败：${String(err)}`);
       }
-      setSessionStatus(agentId, "error");
-      setNotice(`Agent 启动失败：${String(err)}`);
     }
   },
 
-  restartSession: async (projectId, kind) => {
+  restartPane: async (projectId, paneId) => {
     const { config } = get();
     const project = config?.projects.find((p) => p.id === projectId);
-    if (!project) return;
-    const id = sessionId(projectId, kind);
+    const pane = project?.panes.find((item) => item.id === paneId);
+    if (!config || !project || !pane) return;
+    const sid = paneSessionId(projectId, pane);
+    if (!sid) return;
     try {
-      await ptyKill(id);
+      await ptyKill(sid);
     } catch {
       // ignore
     }
-    clearTerminal(id);
-    get().setSessionStatus(id, "idle");
-    if (kind === "runner") {
+    clearTerminal(sid);
+    get().setSessionStatus(sid, "idle");
+    if (pane.kind === "runner") {
       try {
-        await spawnPty({ sessionId: id, cwd: project.path, command: "" });
-        get().setSessionStatus(id, "running");
+        await spawnPty({ sessionId: sid, cwd: project.path, command: "" });
+        get().setSessionStatus(sid, "running");
       } catch (err) {
-        get().setSessionStatus(id, "error");
+        get().setSessionStatus(sid, "error");
         get().setNotice(`Runner 启动失败：${String(err)}`);
       }
       return;
     }
-    const preset = config?.agent_presets.find((p) => p.id === project.agent_preset);
+    const preset = config.agent_presets.find((p) => p.id === (pane.preset_id ?? project.agent_preset));
     const command = preset?.command ?? "cursor-agent";
     const resume =
-      config?.settings.resume_on_start !== false
-        ? resumeArgsForSession(command, project.agent_session_id)
+      config.settings.resume_on_start !== false
+        ? resumeArgsForSession(command, pane.agent_session_id)
         : [];
     try {
       await spawnPty({
-        sessionId: id,
+        sessionId: sid,
         cwd: project.path,
         command,
         args: resume,
       });
-      get().setSessionStatus(id, "running");
+      get().setSessionStatus(sid, "running");
     } catch (err) {
       if (resume.length > 0) {
         try {
           await spawnPty({
-            sessionId: id,
+            sessionId: sid,
             cwd: project.path,
             command,
             args: [],
           });
-          get().setSessionStatus(id, "running");
+          get().setSessionStatus(sid, "running");
           const latest = get().config;
           if (latest) {
-            void get().persist({
-              ...latest,
-              projects: latest.projects.map((p) =>
-                p.id === projectId ? { ...p, agent_session_id: null } : p,
-              ),
-            });
+            const current = latest.projects.find((p) => p.id === projectId);
+            const panes = (current?.panes ?? project.panes).map((item) =>
+              item.id === paneId ? { ...item, agent_session_id: null } : item,
+            );
+            void get().persist(patchProject(latest, projectId, { panes }));
           }
           return;
         } catch (retryErr) {
-          get().setSessionStatus(id, "error");
+          get().setSessionStatus(sid, "error");
           get().setNotice(`Agent 启动失败：${String(retryErr)}`);
           return;
         }
       }
-      get().setSessionStatus(id, "error");
+      get().setSessionStatus(sid, "error");
       get().setNotice(`Agent 启动失败：${String(err)}`);
     }
   },
 
-  rememberAgentSession: async (projectId, chatId) => {
+  rememberAgentSession: async (projectId, paneId, chatId) => {
     const { config } = get();
     if (!config) return;
     const project = config.projects.find((p) => p.id === projectId);
-    if (!project || project.agent_session_id === chatId) return;
-    await get().persist({
-      ...config,
-      projects: config.projects.map((p) =>
-        p.id === projectId ? { ...p, agent_session_id: chatId } : p,
-      ),
-    });
+    const pane = project?.panes.find((item) => item.id === paneId);
+    if (!project || !pane || pane.agent_session_id === chatId) return;
+    const panes = project.panes.map((item) =>
+      item.id === paneId ? { ...item, agent_session_id: chatId } : item,
+    );
+    await get().persist(patchProject(config, projectId, { panes }));
   },
 
   snapshotOpenedSessions: async () => {
@@ -477,13 +513,18 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     for (const projectId of openedProjectIds) {
       const project = config.projects.find((p) => p.id === projectId);
       if (!project) continue;
-      const preset = config.agent_presets.find((p) => p.id === project.agent_preset);
-      const command = preset?.command ?? "cursor-agent";
-      try {
-        const found = await discoverAgentSession(command, project.path);
-        if (found) await get().rememberAgentSession(projectId, found);
-      } catch {
-        // discovery is best-effort
+      for (const pane of project.panes.filter((item) => item.kind === "agent")) {
+        const sid = paneSessionId(projectId, pane);
+        const status = sid ? get().sessionStatus[sid] : undefined;
+        if (status !== "running" && status !== "waiting") continue;
+        const preset = config.agent_presets.find((p) => p.id === (pane.preset_id ?? project.agent_preset));
+        const command = preset?.command ?? "cursor-agent";
+        try {
+          const found = await discoverAgentSession(command, project.path);
+          if (found) await get().rememberAgentSession(projectId, pane.id, found);
+        } catch {
+          // discovery is best-effort
+        }
       }
     }
     const latest = get().config;
@@ -504,8 +545,14 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
       settings: { ...config.settings, theme: normalizeTheme(theme) },
     });
     const { openedProjectIds } = get();
+    const latest = get().config;
+    if (!latest) return;
     for (const id of openedProjectIds) {
-      void get().restartSession(id, "agent");
+      const project = latest.projects.find((p) => p.id === id);
+      if (!project) continue;
+      for (const pane of project.panes.filter((item) => item.kind === "agent")) {
+        void get().restartPane(id, pane.id);
+      }
     }
   },
 

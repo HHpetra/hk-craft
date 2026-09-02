@@ -4,6 +4,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { listen } from "@tauri-apps/api/event";
 import { ptyResize, ptyWrite } from "./api";
+import { parseSessionId } from "./format";
 import { hexToOscRgb, normalizeTheme, xtermThemes, type XtermTheme } from "./theme";
 import type { PtyOutput } from "../types";
 
@@ -205,7 +206,7 @@ type SessionKindKey = "agent" | "runner";
 const lastFittedByKind = new Map<SessionKindKey, FittedSize>();
 
 function sessionKind(sessionId: string): SessionKindKey {
-  return sessionId.endsWith(":runner") ? "runner" : "agent";
+  return parseSessionId(sessionId)?.kind === "runner" ? "runner" : "agent";
 }
 
 function rememberFittedSize(sessionId: string, cols: number, rows: number) {

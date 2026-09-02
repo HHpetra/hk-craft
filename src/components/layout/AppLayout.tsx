@@ -1,19 +1,16 @@
 import { ProjectSidebar } from "../sidebar/ProjectSidebar";
-import { ViewSwitcher } from "./ViewSwitcher";
+import { WorkspaceTabBar } from "./WorkspaceTabBar";
 import { WorkspacePanels } from "./WorkspacePanels";
-import { useWorkspace } from "../../store/workspace";
 import { useHotkeys } from "../../hooks/useHotkeys";
 
 export function AppLayout() {
-  const viewMode = useWorkspace((s) => s.viewMode);
-  const setViewMode = useWorkspace((s) => s.setViewMode);
-  useHotkeys(setViewMode);
+  useHotkeys();
 
   return (
     <div className="flex h-full bg-surface">
       <ProjectSidebar />
       <main className="flex min-w-0 flex-1 flex-col">
-        <ViewSwitcher viewMode={viewMode} onChange={setViewMode} />
+        <WorkspaceTabBar />
         <div className="min-h-0 flex-1">
           <WorkspacePanels />
         </div>

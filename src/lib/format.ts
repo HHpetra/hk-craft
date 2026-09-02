@@ -28,8 +28,21 @@ export function formatTime(epochSeconds: number) {
   return new Date(epochSeconds * 1000).toLocaleString();
 }
 
-export function sessionId(projectId: string, kind: "agent" | "runner") {
-  return `${projectId}:${kind}`;
+export type ParsedSessionId = {
+  projectId: string;
+  kind: "agent" | "runner";
+  paneId: string;
+};
+
+export function sessionId(projectId: string, kind: "agent" | "runner", paneId: string) {
+  return `${projectId}:${kind}:${paneId}`;
+}
+
+export function parseSessionId(id: string): ParsedSessionId | null {
+  const [projectId, kind, ...rest] = id.split(":");
+  const paneId = rest.join(":");
+  if (!projectId || !paneId || (kind !== "agent" && kind !== "runner")) return null;
+  return { projectId, kind, paneId };
 }
 
 export function resumeArgsForSession(command: string, sessionId: string | null | undefined): string[] {

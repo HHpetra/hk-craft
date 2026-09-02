@@ -55,6 +55,16 @@ pub struct Bookmark {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct WorkspacePane {
+    pub id: String,
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preset_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_session_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Project {
     #[serde(default)]
     pub id: String,
@@ -64,8 +74,30 @@ pub struct Project {
     pub agent_preset: String,
     #[serde(default = "default_true")]
     pub agent_seen: bool,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_session_id: Option<String>,
+    #[serde(default = "default_layout")]
+    pub layout: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_pane_id: Option<String>,
+    #[serde(default)]
+    pub panes: Option<Vec<WorkspacePane>>,
+}
+
+impl Default for Project {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            name: String::new(),
+            path: String::new(),
+            agent_preset: String::new(),
+            agent_seen: true,
+            agent_session_id: None,
+            layout: default_layout(),
+            active_pane_id: None,
+            panes: None,
+        }
+    }
 }
 
 impl Default for AppConfig {
@@ -112,6 +144,40 @@ fn default_true() -> bool {
 
 fn default_drag_prefix() -> String {
     "@".into()
+}
+
+fn default_layout() -> String {
+    "row".into()
+}
+
+fn normalize_layout(layout: &str) -> String {
+    match layout {
+        "tabs" | "row" | "grid" => layout.to_string(),
+        _ => default_layout(),
+    }
+}
+
+fn seed_default_panes(agent_preset: &str, agent_session_id: Option<&str>) -> Vec<WorkspacePane> {
+    vec![
+        WorkspacePane {
+            id: uuid::Uuid::new_v4().to_string(),
+            kind: "explorer".into(),
+            preset_id: None,
+            agent_session_id: None,
+        },
+        WorkspacePane {
+            id: uuid::Uuid::new_v4().to_string(),
+            kind: "agent".into(),
+            preset_id: Some(agent_preset.to_string()),
+            agent_session_id: agent_session_id.map(str::to_string),
+        },
+        WorkspacePane {
+            id: uuid::Uuid::new_v4().to_string(),
+            kind: "runner".into(),
+            preset_id: None,
+            agent_session_id: None,
+        },
+    ]
 }
 
 fn default_presets() -> Vec<AgentPreset> {
@@ -177,6 +243,21 @@ impl AppConfig {
                     .first()
                     .map(|p| p.id.clone())
                     .unwrap_or_else(|| "cursor-agent".into());
+            }
+            project.layout = normalize_layout(&project.layout);
+            if project.panes.is_none() {
+                project.panes = Some(seed_default_panes(
+                    &project.agent_preset,
+                    project.agent_session_id.as_deref(),
+                ));
+            }
+            let panes = project.panes.as_deref().unwrap_or(&[]);
+            let active_ok = project
+                .active_pane_id
+                .as_ref()
+                .is_some_and(|id| panes.iter().any(|pane| pane.id == *id));
+            if !active_ok {
+                project.active_pane_id = panes.first().map(|pane| pane.id.clone());
             }
         }
     }
@@ -248,17 +329,61 @@ mod tests {
     fn migrate_fills_empty_project_id() {
         let mut cfg = AppConfig {
             projects: vec![Project {
-                id: String::new(),
                 name: "demo".into(),
                 path: "C:/tmp".into(),
-                agent_preset: String::new(),
-                agent_seen: true,
-                agent_session_id: None,
+                ..Project::default()
             }],
             ..AppConfig::default()
         };
         cfg.migrate();
         assert!(!cfg.projects[0].id.is_empty());
         assert_eq!(cfg.projects[0].agent_preset, "cursor-agent");
+    }
+
+    #[test]
+    fn migrate_seeds_default_panes() {
+        let mut cfg = AppConfig {
+            projects: vec![Project {
+                id: "proj-1".into(),
+                name: "demo".into(),
+                path: "C:/tmp".into(),
+                agent_preset: "opencode".into(),
+                agent_session_id: Some("chat-9".into()),
+                layout: "nope".into(),
+                ..Project::default()
+            }],
+            ..AppConfig::default()
+        };
+        cfg.migrate();
+        let project = &cfg.projects[0];
+        assert_eq!(project.layout, "row");
+        let panes = project.panes.as_ref().expect("seeded panes");
+        assert_eq!(panes.len(), 3);
+        assert_eq!(panes[0].kind, "explorer");
+        assert_eq!(panes[1].kind, "agent");
+        assert_eq!(panes[1].preset_id.as_deref(), Some("opencode"));
+        assert_eq!(panes[1].agent_session_id.as_deref(), Some("chat-9"));
+        assert_eq!(panes[2].kind, "runner");
+        assert_eq!(project.active_pane_id.as_deref(), Some(panes[0].id.as_str()));
+    }
+
+    #[test]
+    fn migrate_keeps_explicit_empty_panes() {
+        let mut cfg = AppConfig {
+            projects: vec![Project {
+                id: "proj-1".into(),
+                name: "demo".into(),
+                path: "C:/tmp".into(),
+                agent_preset: "cursor-agent".into(),
+                layout: "tabs".into(),
+                panes: Some(Vec::new()),
+                ..Project::default()
+            }],
+            ..AppConfig::default()
+        };
+        cfg.migrate();
+        assert_eq!(cfg.projects[0].layout, "tabs");
+        assert_eq!(cfg.projects[0].panes.as_ref().map(Vec::len), Some(0));
+        assert_eq!(cfg.projects[0].active_pane_id, None);
     }
 }

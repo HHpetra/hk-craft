@@ -1,13 +1,12 @@
 import { useEffect, useState } from "react";
 import { ptyWrite } from "./api";
-import { formatAgentInject, formatRunnerInject, sessionId } from "./format";
-import type { SessionKind } from "../types";
+import { formatAgentInject, formatRunnerInject, parseSessionId } from "./format";
 import { useWorkspace } from "../store/workspace";
 
 type DragListener = (paths: string[] | null) => void;
 
 let current: string[] | null = null;
-let hoverKind: SessionKind | null = null;
+let hoverSessionId: string | null = null;
 let lastInjectKey = "";
 let lastInjectAt = 0;
 const listeners = new Set<DragListener>();
@@ -16,19 +15,15 @@ function emit() {
   for (const listener of listeners) listener(current);
 }
 
-function isSessionKind(value: string | null | undefined): value is SessionKind {
-  return value === "agent" || value === "runner";
-}
-
 export function beginPathDrag(paths: string[]) {
   const next = paths.map((p) => p.trim()).filter(Boolean);
   current = next.length ? next : null;
-  hoverKind = null;
+  hoverSessionId = null;
   emit();
 }
 
 export function endPathDrag() {
-  hoverKind = null;
+  hoverSessionId = null;
   if (!current) return;
   current = null;
   emit();
@@ -38,20 +33,24 @@ export function peekPathDrag(): string[] | null {
   return current;
 }
 
-export function noteDropHover(kind: SessionKind | null) {
-  hoverKind = kind;
+export function noteDropHover(session: string | null) {
+  hoverSessionId = session && parseSessionId(session) ? session : null;
 }
 
-export function kindAtPoint(x: number, y: number): SessionKind | null {
+export function sessionAtPoint(x: number, y: number): string | null {
   const el = document.elementFromPoint(x, y);
-  const kind = el?.closest("[data-drop-kind]")?.getAttribute("data-drop-kind");
-  return isSessionKind(kind) ? kind : null;
+  const id = el?.closest("[data-drop-session]")?.getAttribute("data-drop-session");
+  return id && parseSessionId(id) ? id : null;
 }
 
-function prefixForProject(projectId: string) {
+function prefixForSession(session: string) {
+  const parsed = parseSessionId(session);
   const state = useWorkspace.getState();
-  const project = state.config?.projects.find((p) => p.id === projectId);
-  const preset = state.config?.agent_presets.find((p) => p.id === project?.agent_preset);
+  if (!parsed) return "@";
+  const project = state.config?.projects.find((p) => p.id === parsed.projectId);
+  const pane = project?.panes.find((item) => item.id === parsed.paneId);
+  const presetId = pane?.preset_id ?? project?.agent_preset;
+  const preset = state.config?.agent_presets.find((p) => p.id === presetId);
   return preset?.drag_prefix ?? "@";
 }
 
@@ -69,41 +68,37 @@ export function usePathDrag() {
   return paths;
 }
 
-export function injectDroppedPaths(
-  projectId: string,
-  kind: SessionKind,
-  paths: string[],
-  prefix: string,
-) {
-  if (!projectId || !paths.length) return;
-  const key = `${projectId}:${kind}:${paths.join("\0")}`;
+export function injectDroppedPaths(session: string, paths: string[], prefix?: string) {
+  const parsed = parseSessionId(session);
+  if (!parsed || !paths.length) return;
+  const key = `${session}:${paths.join("\0")}`;
   const now = Date.now();
   if (key === lastInjectKey && now - lastInjectAt < 400) return;
   lastInjectKey = key;
   lastInjectAt = now;
+  const dragPrefix = prefix ?? prefixForSession(session);
   const text = paths
     .map((path) =>
-      kind === "agent" ? formatAgentInject(path, prefix) : formatRunnerInject(path),
+      parsed.kind === "agent" ? formatAgentInject(path, dragPrefix) : formatRunnerInject(path),
     )
     .join("");
-  void ptyWrite(sessionId(projectId, kind), text).catch((err) => {
+  void ptyWrite(session, text).catch((err) => {
     useWorkspace.getState().setNotice(String(err));
   });
 }
 
-export function commitPathDrop(kind?: SessionKind | null) {
+export function commitPathDrop(session?: string | null) {
   const paths = peekPathDrag();
   if (!paths?.length) {
     endPathDrag();
     return;
   }
-  const target = isSessionKind(kind) ? kind : hoverKind;
-  const projectId = useWorkspace.getState().activeProjectId;
-  if (!target || !projectId) {
+  const target = session && parseSessionId(session) ? session : hoverSessionId;
+  if (!target) {
     endPathDrag();
     return;
   }
-  injectDroppedPaths(projectId, target, paths, prefixForProject(projectId));
+  injectDroppedPaths(target, paths, prefixForSession(target));
   endPathDrag();
 }
 
@@ -113,22 +108,22 @@ export function usePathDropListeners() {
       if (!peekPathDrag()?.length) return;
       event.preventDefault();
       if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
-      noteDropHover(kindAtPoint(event.clientX, event.clientY));
+      noteDropHover(sessionAtPoint(event.clientX, event.clientY));
     };
     const onDrop = (event: DragEvent) => {
       if (!peekPathDrag()?.length) return;
       event.preventDefault();
-      commitPathDrop(kindAtPoint(event.clientX, event.clientY));
+      commitPathDrop(sessionAtPoint(event.clientX, event.clientY));
     };
     const onDragEnd = (event: DragEvent) => {
       if (!peekPathDrag()?.length) return;
-      commitPathDrop(kindAtPoint(event.clientX, event.clientY));
+      commitPathDrop(sessionAtPoint(event.clientX, event.clientY));
     };
     const onPointerUp = () => {
-      if (!peekPathDrag()?.length || !hoverKind) return;
-      const kind = hoverKind;
+      if (!peekPathDrag()?.length || !hoverSessionId) return;
+      const session = hoverSessionId;
       window.setTimeout(() => {
-        if (peekPathDrag()?.length) commitPathDrop(kind);
+        if (peekPathDrag()?.length) commitPathDrop(session);
       }, 0);
     };
     document.addEventListener("dragover", onDragOver, true);

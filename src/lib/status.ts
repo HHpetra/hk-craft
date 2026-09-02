@@ -1,12 +1,9 @@
 import type { SessionStatus } from "../types";
 
-export function projectBadge(
-  agent: SessionStatus | undefined,
-  runner: SessionStatus | undefined,
-): SessionStatus {
+export function projectBadge(...statuses: Array<SessionStatus | undefined>): SessionStatus {
   const ranks: SessionStatus[] = ["error", "running", "waiting", "exited", "idle"];
   for (const status of ranks) {
-    if (agent === status || runner === status) return status;
+    if (statuses.some((item) => item === status)) return status;
   }
   return "idle";
 }

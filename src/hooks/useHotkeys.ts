@@ -1,7 +1,10 @@
 import { useEffect } from "react";
-import type { ViewMode } from "../types";
+import type { WorkspaceLayout } from "../types";
+import { useWorkspace } from "../store/workspace";
 
-export function useHotkeys(setViewMode: (mode: ViewMode) => void) {
+export function useHotkeys() {
+  const setLayout = useWorkspace((s) => s.setLayout);
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (!event.ctrlKey && !event.metaKey) return;
@@ -17,19 +20,18 @@ export function useHotkeys(setViewMode: (mode: ViewMode) => void) {
       ) {
         return;
       }
-      const map: Record<string, ViewMode> = {
-        "1": "explorer",
-        "2": "agent",
-        "3": "runner",
-        "4": "tiled",
+      const map: Record<string, WorkspaceLayout> = {
+        "1": "tabs",
+        "2": "row",
+        "3": "grid",
       };
-      const mode = map[event.key];
-      if (!mode) return;
+      const layout = map[event.key];
+      if (!layout) return;
       event.preventDefault();
       event.stopPropagation();
-      setViewMode(mode);
+      void setLayout(layout);
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [setViewMode]);
+  }, [setLayout]);
 }

@@ -70,14 +70,16 @@ export function SettingsDialog() {
     }).then((ok) => {
       if (!ok) return;
       setOpen(false);
-      const { openedProjectIds, restartSession } = useWorkspace.getState();
+      const { openedProjectIds, restartPane } = useWorkspace.getState();
       for (const project of projects) {
         if (!openedProjectIds.includes(project.id)) continue;
-        const prev = current.projects.find((p) => p.id === project.id);
-        const prevCmd = current.agent_presets.find((p) => p.id === prev?.agent_preset)?.command;
-        const nextCmd = presets.find((p) => p.id === project.agent_preset)?.command;
-        if (prevCmd !== nextCmd) {
-          void restartSession(project.id, "agent");
+        for (const pane of project.panes.filter((item) => item.kind === "agent")) {
+          const presetId = pane.preset_id ?? project.agent_preset;
+          const prevCmd = current.agent_presets.find((p) => p.id === presetId)?.command;
+          const nextCmd = presets.find((p) => p.id === presetId)?.command;
+          if (prevCmd !== nextCmd) {
+            void restartPane(project.id, pane.id);
+          }
         }
       }
     });
@@ -147,10 +149,10 @@ export function SettingsDialog() {
               checked={config.settings.resume_on_start !== false}
               onChange={(e) => void setResumeOnStart(e.target.checked)}
             />
-            启动时按项目恢复上次的 Agent 会话
+            启动时按面板恢复上次的 Agent 会话
           </label>
           <p className="mt-1 text-[11px] text-ink-subtle">
-            每个项目会记住当前会话 ID，下次用 --resume / --session 精确接上。多个项目互不影响。终端画面不会恢复。
+            每个 Agent 面板会记住当前会话 ID，下次用 --resume / --session 精确接上。多个面板互不影响。终端画面不会恢复。
           </p>
         </section>
 

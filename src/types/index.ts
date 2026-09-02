@@ -1,4 +1,6 @@
-export type ViewMode = "explorer" | "agent" | "runner" | "tiled";
+export type WorkspaceLayout = "tabs" | "row" | "grid";
+
+export type PaneKind = "explorer" | "agent" | "runner";
 
 export type SessionKind = "agent" | "runner";
 
@@ -31,6 +33,13 @@ export interface Bookmark {
   path: string;
 }
 
+export interface WorkspacePane {
+  id: string;
+  kind: PaneKind;
+  preset_id?: string | null;
+  agent_session_id?: string | null;
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -38,6 +47,9 @@ export interface Project {
   agent_preset: string;
   agent_seen: boolean;
   agent_session_id: string | null;
+  layout: WorkspaceLayout;
+  active_pane_id: string | null;
+  panes: WorkspacePane[];
 }
 
 export interface AppConfig {

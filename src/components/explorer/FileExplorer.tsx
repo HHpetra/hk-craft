@@ -4,8 +4,8 @@ import type { DragEvent } from "react";
 import { fsList, fsOpen } from "../../lib/api";
 import { beginPathDrag } from "../../lib/dnd";
 import { breadcrumbParts, cn, formatSize, formatTime, pathsEqual } from "../../lib/format";
-import type { Bookmark, ExplorerView, FileEntry } from "../../types";
-import { useActiveProject, useWorkspace } from "../../store/workspace";
+import type { Bookmark, ExplorerView, FileEntry, Project } from "../../types";
+import { useWorkspace } from "../../store/workspace";
 
 type SortKey = "name" | "modified" | "kind" | "size";
 
@@ -16,8 +16,7 @@ function startDrag(event: DragEvent, path: string) {
   beginPathDrag([path]);
 }
 
-export function FileExplorer() {
-  const project = useActiveProject();
+export function FileExplorer({ project }: { project: Project }) {
   const bookmarks = useWorkspace((s) => s.config?.bookmarks ?? []);
   const explorerView = (useWorkspace((s) => s.config?.settings.explorer_view) === "icons"
     ? "icons"
