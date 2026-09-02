@@ -12,6 +12,14 @@ import type {
 import { checkDir, deleteRunnerPersist, discoverAgentSession, loadConfig, ptyKill, ptySpawn, saveConfig } from "../lib/api";
 import { pathsEqual, resumeArgsForSession } from "../lib/format";
 import { createPane, neighborPaneId, normalizeLayout, paneSessionId, terminalPanes, withDefaultWorkspace } from "../lib/panes";
+import {
+  nextWorkingId,
+  placeProject,
+  placementUnchanged,
+  stowedProjects,
+  workingProjects,
+  type ProjectGroup,
+} from "../lib/projects";
 import { applyDocumentTheme, normalizeTheme } from "../lib/theme";
 import {
   applyRegisteredTerminalFont,
@@ -47,6 +55,9 @@ interface WorkspaceState {
   selectProject: (id: string) => Promise<void>;
   addProject: (name: string, path: string, agentPreset: string) => Promise<void>;
   reorderProjects: (fromId: string, toIndex: number) => Promise<void>;
+  moveProject: (fromId: string, dest: ProjectGroup, toIndex: number) => Promise<void>;
+  stowProject: (id: string) => Promise<void>;
+  unstowProject: (id: string, activate: boolean) => Promise<void>;
   closeProject: (id: string) => Promise<void>;
   removeProject: (id: string) => Promise<void>;
   updateProjectPreset: (id: string, agentPreset: string) => Promise<void>;
@@ -125,10 +136,8 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     try {
       const config = await loadConfig();
       const savedActive = config.settings.active_project_id;
-      const active =
-        savedActive && config.projects.some((p) => p.id === savedActive)
-          ? savedActive
-          : (config.projects[0]?.id ?? null);
+      const saved = savedActive ? config.projects.find((p) => p.id === savedActive) : undefined;
+      const active = saved && !saved.stowed ? saved.id : nextWorkingId(config.projects);
       const project = config.projects.find((p) => p.id === active) ?? null;
       set({
         config,
@@ -187,6 +196,10 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     if (!config) return;
     const project = config.projects.find((p) => p.id === id);
     if (!project) return;
+    if (project.stowed) {
+      await get().unstowProject(id, true);
+      return;
+    }
     if (get().activeProjectId === id && get().openedProjectIds.includes(id)) {
       return;
     }
@@ -228,10 +241,11 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
       agent_preset: agentPreset,
       agent_seen: false,
       agent_session_id: null,
+      stowed: false,
     });
     const next: AppConfig = {
       ...config,
-      projects: [...config.projects, project],
+      projects: [...workingProjects(config.projects), project, ...stowedProjects(config.projects)],
       settings: { ...config.settings, active_project_id: project.id },
     };
     const saved = await get().persist(next);
@@ -246,25 +260,64 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   },
 
   reorderProjects: async (fromId, toIndex) => {
+    const from = get().config?.projects.find((project) => project.id === fromId);
+    if (!from) return;
+    await get().moveProject(fromId, from.stowed ? "stowed" : "working", toIndex);
+  },
+
+  moveProject: async (fromId, dest, toIndex) => {
     const { config } = get();
     if (!config) return;
-    const fromIndex = config.projects.findIndex((p) => p.id === fromId);
-    if (fromIndex < 0 || config.projects.length === 0) return;
-    const clamped = Math.max(0, Math.min(toIndex, config.projects.length - 1));
-    if (fromIndex === clamped) return;
-    const prev = config.projects;
-    const projects = [...prev];
-    const [moved] = projects.splice(fromIndex, 1);
-    if (!moved) return;
-    projects.splice(clamped, 0, moved);
-    const next: AppConfig = { ...config, projects };
-    set({ config: next });
+    const from = config.projects.find((project) => project.id === fromId);
+    if (!from) return;
+    const projects = placeProject(config.projects, fromId, dest, toIndex);
+    if (placementUnchanged(config.projects, projects)) return;
+    const becomingStowed = dest === "stowed" && !from.stowed;
+    const wasActive = becomingStowed && get().activeProjectId === fromId;
+    const nextActive = wasActive ? nextWorkingId(projects, fromId) : get().activeProjectId;
+    const prevConfig = config;
+    const prevActive = get().activeProjectId;
+    const next: AppConfig = {
+      ...config,
+      projects,
+      settings: { ...config.settings, active_project_id: nextActive },
+    };
+    set({ config: next, activeProjectId: nextActive });
     const saved = await get().persist(next);
     if (!saved) {
-      set((s) => ({
-        config: s.config ? { ...s.config, projects: prev } : { ...config, projects: prev },
-      }));
+      set({ config: prevConfig, activeProjectId: prevActive });
+      return;
     }
+    if (!becomingStowed) return;
+    await get().closeProject(fromId);
+    set({ notice: `已收纳「${from.name}」` });
+    if (!wasActive || !nextActive) return;
+    const project = projects.find((item) => item.id === nextActive);
+    if (!project) return;
+    set((s) => ({
+      openedProjectIds: s.openedProjectIds.includes(nextActive)
+        ? s.openedProjectIds
+        : [...s.openedProjectIds, nextActive],
+    }));
+    await get().spawnForProject(project);
+  },
+
+  stowProject: async (id) => {
+    const from = get().config?.projects.find((project) => project.id === id);
+    if (!from || from.stowed) return;
+    const stowed = stowedProjects(get().config?.projects ?? []);
+    await get().moveProject(id, "stowed", stowed.length);
+  },
+
+  unstowProject: async (id, activate) => {
+    const from = get().config?.projects.find((project) => project.id === id);
+    if (!from) return;
+    if (from.stowed) {
+      const working = workingProjects(get().config?.projects ?? []);
+      await get().moveProject(id, "working", working.length);
+    }
+    const latest = get().config?.projects.find((project) => project.id === id);
+    if (activate && latest && !latest.stowed) await get().selectProject(id);
   },
 
   closeProject: async (id) => {
@@ -293,7 +346,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     if (!config) return;
     const wasActive = get().activeProjectId === id;
     const projects = config.projects.filter((p) => p.id !== id);
-    const nextActive = wasActive ? (projects[0]?.id ?? null) : get().activeProjectId;
+    const nextActive = wasActive ? nextWorkingId(projects) : get().activeProjectId;
     const next: AppConfig = {
       ...config,
       projects,

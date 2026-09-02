@@ -26,7 +26,7 @@ export function withDefaultWorkspace(project: Omit<Project, "layout" | "active_p
     project.active_pane_id && panes.some((pane) => pane.id === project.active_pane_id)
       ? project.active_pane_id
       : (panes[0]?.id ?? null);
-  return { ...project, layout, panes, active_pane_id: active };
+  return { stowed: false, ...project, layout, panes, active_pane_id: active };
 }
 
 export function paneSessionId(projectId: string, pane: WorkspacePane) {

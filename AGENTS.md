@@ -47,6 +47,7 @@
 ### 2.3 PTY 会话常驻与生命周期 (Session Persistence)
 - PTY 进程完全运行并驻留在 Rust 后端。
 - 前端切换左侧项目、切换 Tab/布局仅改变 DOM 挂载或可见性，**绝对不可销毁后台 PTY 进程或丢失终端输出缓冲区**。
+- 左侧项目可收纳：收纳会关闭该项目本轮 PTY，但保留布局、Agent session 与 Runner 历史；彻底移除只从收纳区执行。
 
 ### 2.4 内部拖拽注入协议 (Drag-to-Inject Protocol)
 - 从内部文件管理器拖拽文件至终端时：

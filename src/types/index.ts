@@ -50,6 +50,7 @@ export interface Project {
   layout: WorkspaceLayout;
   active_pane_id: string | null;
   panes: WorkspacePane[];
+  stowed?: boolean;
 }
 
 export interface AppConfig {

@@ -82,6 +82,8 @@ pub struct Project {
     pub active_pane_id: Option<String>,
     #[serde(default)]
     pub panes: Option<Vec<WorkspacePane>>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub stowed: bool,
 }
 
 impl Default for Project {
@@ -96,6 +98,7 @@ impl Default for Project {
             layout: default_layout(),
             active_pane_id: None,
             panes: None,
+            stowed: false,
         }
     }
 }
@@ -140,6 +143,10 @@ fn default_split_ratio() -> Vec<f64> {
 
 fn default_true() -> bool {
     true
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 fn default_drag_prefix() -> String {
@@ -462,5 +469,39 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn stowed_defaults_false_and_skips_toml() {
+        let project = Project {
+            id: "p1".into(),
+            name: "demo".into(),
+            path: "C:/tmp".into(),
+            ..Project::default()
+        };
+        assert!(!project.stowed);
+        let body = toml::to_string(&project).expect("serialize project");
+        assert!(!body.contains("stowed"));
+
+        let parsed: Project = toml::from_str(
+            r#"
+name = "demo"
+path = "C:/tmp"
+"#,
+        )
+        .expect("parse project");
+        assert!(!parsed.stowed);
+
+        let stowed: Project = toml::from_str(
+            r#"
+name = "demo"
+path = "C:/tmp"
+stowed = true
+"#,
+        )
+        .expect("parse stowed project");
+        assert!(stowed.stowed);
+        let stowed_body = toml::to_string(&stowed).expect("serialize stowed");
+        assert!(stowed_body.contains("stowed = true"));
     }
 }
