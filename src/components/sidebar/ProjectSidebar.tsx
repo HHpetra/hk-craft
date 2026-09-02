@@ -148,15 +148,15 @@ export function ProjectSidebar() {
   return (
     <aside
       ref={asideRef}
-      className="flex w-56 shrink-0 flex-col border-r border-line bg-surface-sidebar"
+      className="flex w-52 shrink-0 flex-col border-r border-line bg-surface-sidebar"
     >
-      <div className="px-3 py-3 text-[11px] uppercase tracking-wide text-ink-subtle">
+      <div className="px-3 pt-3 pb-1.5 text-[10px] font-medium uppercase tracking-widest text-ink-subtle/70">
         项目
       </div>
       <div className="flex min-h-0 flex-1 flex-col">
-        <div ref={workingListRef} className="min-h-0 flex-1 overflow-auto">
+        <div ref={workingListRef} className="min-h-0 flex-1 overflow-auto py-0.5">
           {working.length === 0 && (
-            <div className="px-3 py-2 text-ink-subtle">
+            <div className="px-3 py-2 text-[12px] text-ink-subtle">
               {stowed.length > 0 ? "暂无工作项目" : "暂无项目"}
             </div>
           )}
@@ -197,9 +197,9 @@ export function ProjectSidebar() {
               ref={stowHeaderRef}
               type="button"
               className={cn(
-                "flex w-full items-center gap-1 px-3 py-2 text-[11px] tracking-wide text-ink-subtle",
-                stowed.length > 0 && "hover:bg-hover hover:text-ink",
-                dropOnHeader && "bg-hover text-ink",
+                "flex w-full items-center gap-1 px-3 py-1.5 text-[10px] font-medium uppercase tracking-widest text-ink-subtle/70",
+                stowed.length > 0 && "hover:bg-hover hover:text-ink-subtle",
+                dropOnHeader && "bg-hover text-ink-subtle",
               )}
               onClick={() => {
                 if (stowed.length === 0) return;
@@ -208,9 +208,9 @@ export function ProjectSidebar() {
             >
               {stowed.length > 0 &&
                 (stowOpen ? (
-                  <ChevronDown size={12} className="pointer-events-none" />
+                  <ChevronDown size={11} className="pointer-events-none" />
                 ) : (
-                  <ChevronRight size={12} className="pointer-events-none" />
+                  <ChevronRight size={11} className="pointer-events-none" />
                 ))}
               <span className="pointer-events-none">
                 {stowed.length > 0 ? `收纳 (${stowed.length})` : "放到收纳"}
@@ -255,21 +255,21 @@ export function ProjectSidebar() {
           </div>
         )}
       </div>
-      <div className="border-t border-line p-2">
+      <div className="border-t border-line p-1.5 space-y-0.5">
         <button
           type="button"
-          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-ink-muted hover:bg-hover hover:text-ink"
+          className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-[12px] text-ink-subtle hover:bg-hover hover:text-ink"
           onClick={() => setProjectDialogOpen(true)}
         >
-          <Plus size={14} />
+          <Plus size={13} />
           新建项目
         </button>
         <button
           type="button"
-          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-ink-muted hover:bg-hover hover:text-ink"
+          className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-[12px] text-ink-subtle hover:bg-hover hover:text-ink"
           onClick={() => setSettingsOpen(true)}
         >
-          <Settings size={14} />
+          <Settings size={13} />
           软件设置
         </button>
       </div>
@@ -312,9 +312,9 @@ function ProjectRow({
       data-working-id={working ? project.id : undefined}
       data-stowed-id={working ? undefined : project.id}
       className={cn(
-        "group relative flex cursor-grab touch-none select-none items-center gap-2 px-3 py-2 hover:bg-hover",
+        "group relative mx-1.5 flex cursor-grab touch-none select-none items-center gap-2 rounded px-2 py-1.5 hover:bg-hover",
         active && "bg-active",
-        dragging && "cursor-grabbing opacity-50",
+        dragging && "cursor-grabbing opacity-40",
       )}
       tabIndex={working ? 0 : undefined}
       onPointerDown={onPointerDown}
@@ -328,12 +328,18 @@ function ProjectRow({
       }}
     >
       {line === "before" && (
-        <span className="pointer-events-none absolute inset-x-2 top-px z-10 h-px bg-ink" />
+        <span className="pointer-events-none absolute inset-x-1 top-px z-10 h-px rounded-full bg-accent" />
       )}
-      <Folder size={14} className="pointer-events-none shrink-0 text-ink-subtle" />
+      <Folder
+        size={13}
+        className={cn(
+          "pointer-events-none shrink-0",
+          active ? "text-ink-muted" : "text-ink-subtle",
+        )}
+      />
       <span
         className={cn(
-          "pointer-events-none min-w-0 flex-1 truncate",
+          "pointer-events-none min-w-0 flex-1 truncate text-[12px]",
           active ? "text-ink" : "text-ink-muted",
         )}
       >
@@ -351,7 +357,7 @@ function ProjectRow({
             onStop();
           }}
         >
-          <CircleStop size={13} />
+          <CircleStop size={12} />
         </button>
       )}
       {working && onStow && (
@@ -365,7 +371,7 @@ function ProjectRow({
             onStow();
           }}
         >
-          <Archive size={13} />
+          <Archive size={12} />
         </button>
       )}
       {!working && onRestore && (
@@ -379,13 +385,13 @@ function ProjectRow({
             onRestore();
           }}
         >
-          <ArchiveRestore size={13} />
+          <ArchiveRestore size={12} />
         </button>
       )}
       {!working && onRemove && (
         <button
           type="button"
-          className="hidden shrink-0 text-ink-subtle hover:text-ink group-hover:block"
+          className="hidden shrink-0 text-ink-subtle hover:text-red-400 group-hover:block"
           title="彻底移除"
           onPointerDown={(event) => event.stopPropagation()}
           onClick={(event) => {
@@ -393,11 +399,11 @@ function ProjectRow({
             onRemove();
           }}
         >
-          <X size={13} />
+          <X size={12} />
         </button>
       )}
       {line === "after" && (
-        <span className="pointer-events-none absolute inset-x-2 bottom-px z-10 h-px bg-ink" />
+        <span className="pointer-events-none absolute inset-x-1 bottom-px z-10 h-px rounded-full bg-accent" />
       )}
     </div>
   );
