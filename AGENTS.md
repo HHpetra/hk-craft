@@ -1,6 +1,6 @@
-# Agent Guidelines for Agent Workbench
+# Agent Guidelines for HK-Craft
 
-本项目是一个专为 CLI AI Agent 研发流（Agent-Centric Workflow）设计的多项目轻量级三位一体桌面工作台（Agent Workbench）。
+本项目是一个专为 CLI AI Agent 研发流（Agent-Centric Workflow）设计的多项目轻量级三位一体桌面工作台（HK-Craft）。
 本项目整合了 **GUI 文件资源管理器**、**Agent 专属 CLI 终端** 与 **常规运行/调试终端（Runner Terminal）**。
 
 ---
@@ -22,7 +22,7 @@
 - **异步与并发**: `tokio` (Tauri 异步命令支持)
 
 ### 配置存储 (Config & Storage)
-- **配置文件**: 本地单文件 TOML，默认路径 `~/.agent-workbench/config.toml`
+- **配置文件**: 本地单文件 TOML，默认路径 `~/.hk-craft/config.toml`
 
 ---
 

@@ -650,8 +650,8 @@ mod tests {
         let plain = powershell_startup_command(None);
         assert!(plain.contains("chcp 65001"));
         assert!(!plain.contains("HistorySavePath"));
-        let with_hist = powershell_startup_command(Some(Path::new(r"C:\Users\me\.agent-workbench\runners\p1\history")));
+        let with_hist = powershell_startup_command(Some(Path::new(r"C:\Users\me\.hk-craft\runners\p1\history")));
         assert!(with_hist.contains("Set-PSReadLineOption -HistorySavePath"));
-        assert!(with_hist.contains(r"'C:\Users\me\.agent-workbench\runners\p1\history'"));
+        assert!(with_hist.contains(r"'C:\Users\me\.hk-craft\runners\p1\history'"));
     }
 }

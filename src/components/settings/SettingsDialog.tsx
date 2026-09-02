@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { FolderOpen, Plus, Trash2, X } from "lucide-react";
 import type { AgentPreset, Bookmark } from "../../types";
+import { APP_COPYRIGHT, APP_GIT_HASH, APP_NAME, APP_VERSION } from "../../lib/appInfo";
 import { pickDirectory } from "../../lib/dialog";
 import { discoverLocalNerdFonts, listDetectedNerdFonts } from "../../lib/termRegistry";
 import { normalizeTheme } from "../../lib/theme";
@@ -312,21 +313,33 @@ export function SettingsDialog() {
           </div>
         </section>
 
-        <div className="flex justify-end gap-2">
-          <button
-            type="button"
-            className="rounded-md px-3 py-1.5 text-ink-muted hover:text-ink"
-            onClick={() => setOpen(false)}
-          >
-            取消
-          </button>
-          <button
-            type="button"
-            className="rounded-md bg-btn px-3 py-1.5 text-btn-fg hover:opacity-90"
-            onClick={save}
-          >
-            保存
-          </button>
+        <div className="mt-4 border-t border-line pt-3">
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              className="rounded-md px-3 py-1.5 text-ink-muted hover:text-ink"
+              onClick={() => setOpen(false)}
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              className="rounded-md bg-btn px-3 py-1.5 text-btn-fg hover:opacity-90"
+              onClick={save}
+            >
+              保存
+            </button>
+          </div>
+          <footer className="mt-3 select-text text-[11px] leading-5 text-ink-subtle">
+            <div>
+              {APP_NAME} v{APP_VERSION}
+              <span className="mx-1.5">·</span>
+              <span className="font-mono" title="Git commit">
+                {APP_GIT_HASH}
+              </span>
+            </div>
+            <div>{APP_COPYRIGHT}</div>
+          </footer>
         </div>
       </div>
     </div>

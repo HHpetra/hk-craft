@@ -1,5 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    agent_workbench_lib::run()
+    hk_craft_lib::run()
 }

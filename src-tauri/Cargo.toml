@@ -1,12 +1,13 @@
 [package]
-name = "agent-workbench"
+name = "hk-craft"
 version = "0.1.0"
-description = "Agent Workbench — trinity desktop for CLI AI agents"
-authors = ["you"]
+description = "HK-Craft — A Trinity Desktop Workbench for CLI AI Agents by Hongshan Tech"
+authors = ["Hongshan Tech"]
+license = "MIT"
 edition = "2021"
 
 [lib]
-name = "agent_workbench_lib"
+name = "hk_craft_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

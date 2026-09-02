@@ -9,28 +9,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
-name = "agent-workbench"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "dirs",
- "dunce",
- "encoding_rs",
- "open",
- "portable-pty",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-notification",
- "thiserror 2.0.20",
- "tokio",
- "toml 0.8.23",
- "uuid",
-]
-
-[[package]]
 name = "aho-corasick"
 version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1507,6 +1485,28 @@ name = "hex"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
+
+[[package]]
+name = "hk-craft"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "dirs",
+ "dunce",
+ "encoding_rs",
+ "open",
+ "portable-pty",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-notification",
+ "thiserror 2.0.20",
+ "tokio",
+ "toml 0.8.23",
+ "uuid",
+]
 
 [[package]]
 name = "html5ever"

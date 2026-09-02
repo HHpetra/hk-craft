@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Agent Workbench",
+  "productName": "HK-Craft",
   "version": "0.1.0",
-  "identifier": "com.agent.workbench",
+  "identifier": "com.hongshan.hkcraft",
   "build": {
     "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Agent Workbench",
+        "title": "HK-Craft",
         "width": 1440,
         "height": 900,
         "minWidth": 960,
@@ -26,12 +26,22 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "publisher": "Hongshan Tech",
+    "copyright": "Copyright © 2026 Hongshan Tech",
+    "shortDescription": "Trinity Desktop Workbench for CLI AI Agents",
+    "longDescription": "HK-Craft is a lightweight trinity desktop workbench integrating File Explorer, Agent CLI, and Runner Terminal for seamless AI-centric development.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
+      "icons/256x256.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "windows": {
+      "nsis": {
+        "installerIcon": "icons/icon.ico"
+      }
+    }
   }
 }

@@ -1,5 +1,5 @@
 {
-  "name": "agent-workbench",
+  "name": "hk-craft",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -8,6 +8,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
+    "icons": "tauri icon app-icon.png",
     "type-check": "tsc --noEmit",
     "lint": "tsc --noEmit"
   },

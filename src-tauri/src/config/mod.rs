@@ -305,7 +305,15 @@ impl AppConfig {
 
 pub fn config_path() -> AppResult<PathBuf> {
     let home = dirs::home_dir().ok_or_else(|| AppError::msg("无法解析用户主目录"))?;
-    Ok(home.join(".agent-workbench").join("config.toml"))
+    let new_path = home.join(".hk-craft").join("config.toml");
+    let old_path = home.join(".agent-workbench").join("config.toml");
+    if !new_path.exists() && old_path.exists() {
+        if let Some(parent) = new_path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let _ = fs::copy(&old_path, &new_path);
+    }
+    Ok(new_path)
 }
 
 pub fn load_from_disk(path: &Path) -> AppResult<AppConfig> {

@@ -53,7 +53,7 @@ export function ProjectDialog() {
             value={name}
             onChange={(e) => setName(e.target.value)}
             className="w-full rounded-md bg-field px-2 py-1.5 text-ink outline-none"
-            placeholder="Agent10-WorkTable"
+            placeholder="my-project"
           />
         </label>
         <label className="mb-3 block">

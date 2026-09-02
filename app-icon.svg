@@ -1,0 +1,230 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <!-- Background Gradient -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0c111d" />
+      <stop offset="50%" stop-color="#161e31" />
+      <stop offset="100%" stop-color="#090d16" />
+    </linearGradient>
+
+    <!-- Drop Shadow Filter -->
+    <filter id="cubeShadow" x="-30%" y="-20%" width="160%" height="160%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="16" />
+      <feOffset dx="0" dy="24" result="offsetblur" />
+      <feFlood flood-color="#000000" flood-opacity="0.6" />
+      <feComposite in2="offsetblur" operator="in" />
+      <feMerge>
+        <feMergeNode />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+
+    <filter id="softGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="8" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+
+    <!-- Top Wood Gradient (Bright Oak) -->
+    <linearGradient id="topWood" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#d49b55" />
+      <stop offset="50%" stop-color="#ba7f3b" />
+      <stop offset="100%" stop-color="#a36b28" />
+    </linearGradient>
+
+    <!-- Left Face Wood (Shadow Side) -->
+    <linearGradient id="leftWood" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#7a4b1f" />
+      <stop offset="100%" stop-color="#4e2b0d" />
+    </linearGradient>
+
+    <!-- Right Face Wood (Light/Mid Side) -->
+    <linearGradient id="rightWood" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#99632d" />
+      <stop offset="100%" stop-color="#6b3e15" />
+    </linearGradient>
+
+    <!-- Grid Slot Inset -->
+    <linearGradient id="slotGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#543110" />
+      <stop offset="100%" stop-color="#3b2007" />
+    </linearGradient>
+
+    <linearGradient id="centerSlotGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.4" />
+      <stop offset="100%" stop-color="#6366f1" stop-opacity="0.7" />
+    </linearGradient>
+
+    <!-- Metal / Iron Tool Gradients -->
+    <linearGradient id="ironGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f1f5f9" />
+      <stop offset="50%" stop-color="#cbd5e1" />
+      <stop offset="100%" stop-color="#64748b" />
+    </linearGradient>
+
+    <linearGradient id="accentCyan" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8" />
+      <stop offset="100%" stop-color="#0284c7" />
+    </linearGradient>
+  </defs>
+
+  <!-- Base App Background Squircle -->
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#bgGrad)" stroke="#222f46" stroke-width="3" />
+  
+  <!-- Subtle Ambient Glow on Floor -->
+  <ellipse cx="256" cy="410" rx="180" ry="48" fill="#38bdf8" opacity="0.12" filter="url(#softGlow)" />
+  <ellipse cx="256" cy="414" rx="140" ry="34" fill="#000000" opacity="0.5" />
+
+  <!-- Crafting Table 3D Cube Group with Shadow -->
+  <g filter="url(#cubeShadow)">
+    
+    <!-- ==================== LEFT FACE (Shadow / Saw side) ==================== -->
+    <polygon points="108,195 256,280 256,440 108,355" fill="url(#leftWood)" stroke="#3a1e08" stroke-width="2" stroke-linejoin="round" />
+
+    <!-- Left Corner Pillar Reinforcements -->
+    <!-- Left vertical post -->
+    <polygon points="108,195 125.8,205.2 125.8,365.2 108,355" fill="#5f3513" />
+    <!-- Right vertical post on left face -->
+    <polygon points="238.2,269.8 256,280 256,440 238.2,429.8" fill="#3f210a" />
+    <!-- Top horizontal beam -->
+    <polygon points="108,195 256,280 256,305.6 108,220.6" fill="#6b3d16" />
+    <!-- Bottom horizontal beam -->
+    <polygon points="108,329.4 256,414.4 256,440 108,355" fill="#341b07" />
+
+    <!-- Left Inset Tool Board -->
+    <polygon points="125.8,234 238.2,298.6 238.2,401 125.8,336.4" fill="#42240b" stroke="#2c1504" stroke-width="1.5" />
+
+    <!-- Left Side: Hanging Saw (Minecraft Classic) -->
+    <!-- Saw Blade (Silver metallic diagonal) -->
+    <g transform="matrix(0.866, 0.5, 0, 1, 0, 0)">
+      <!-- Render isometric saw projected on left face -->
+    </g>
+    <!-- Isometric Drawn Saw Blade on Left Panel -->
+    <polygon points="143.5,266.6 220.5,368.4 220.5,378 143.5,282.6" fill="url(#ironGrad)" stroke="#1e293b" stroke-width="1" />
+    <!-- Saw Handle (Wood / Brass) -->
+    <polygon points="134.6,255.1 152.4,262.1 155.4,292.6 137.6,282.4" fill="#b45309" stroke="#78350f" stroke-width="1" />
+    <!-- Saw Teeth -->
+    <polygon points="164.2,305.7 170.2,317.1 176.1,315.7" fill="#cbd5e1" />
+    <polygon points="185,333.6 190.9,345 196.8,343.6" fill="#cbd5e1" />
+    <polygon points="202.7,356.6 208.6,368 214.6,366.6" fill="#cbd5e1" />
+
+    <!-- Left Corner Nails / Screws (Metal Rivets) -->
+    <circle cx="116.9" cy="212.9" r="2.5" fill="#1e293b" stroke="#64748b" stroke-width="1" />
+    <circle cx="247.1" cy="287.7" r="2.5" fill="#1e293b" stroke="#64748b" stroke-width="1" />
+    <circle cx="116.9" cy="347.3" r="2.5" fill="#1e293b" stroke="#64748b" stroke-width="1" />
+    <circle cx="247.1" cy="422.1" r="2.5" fill="#1e293b" stroke="#64748b" stroke-width="1" />
+
+
+    <!-- ==================== RIGHT FACE (Light / Hammer side) ==================== -->
+    <polygon points="256,280 404,195 404,355 256,440" fill="url(#rightWood)" stroke="#4a290c" stroke-width="2" stroke-linejoin="round" />
+
+    <!-- Right Corner Pillars & Frame -->
+    <!-- Left vertical post on right face -->
+    <polygon points="273.8,269.8 256,280 256,440 273.8,429.8" fill="#542e0d" />
+    <!-- Right vertical post on right face -->
+    <polygon points="404,195 386.2,205.2 386.2,365.2 404,355" fill="#7c4819" />
+    <!-- Top horizontal beam -->
+    <polygon points="404,195 256,280 256,305.6 404,220.6" fill="#905622" />
+    <!-- Bottom horizontal beam -->
+    <polygon points="404,329.4 256,414.4 256,440 404,355" fill="#4a290c" />
+
+    <!-- Right Inset Tool Board -->
+    <polygon points="386.2,234 273.8,298.6 273.8,401 386.2,336.4" fill="#5a3311" stroke="#3c1f06" stroke-width="1.5" />
+
+    <!-- Right Side: Hanging Hammer & Pliers / Pocket -->
+    <!-- Hammer Handle (Diagonal Wood) -->
+    <polygon points="356.6,337.4 303.4,300.8 297.4,307.4 350.7,347.2" fill="#d97706" stroke="#92400e" stroke-width="1" />
+    <!-- Hammer Head (Iron Block) -->
+    <polygon points="315.2,284.4 285.6,320.6 294.5,331.5 324.1,295.3" fill="url(#ironGrad)" stroke="#1e293b" stroke-width="1.2" />
+
+    <!-- Small Pliers / Pouch in lower right -->
+    <polygon points="371.4,277.7 341.8,294.7 347.8,332.9 371.4,319.3" fill="#78350f" stroke="#451a03" stroke-width="1" />
+    <polygon points="365.5,268.3 350.7,276.8 353.7,291.1 368.5,282.6" fill="url(#ironGrad)" stroke="#334155" stroke-width="1" />
+
+    <!-- Right Corner Nails / Screws -->
+    <circle cx="395.1" cy="212.9" r="2.5" fill="#334155" stroke="#94a3b8" stroke-width="1" />
+    <circle cx="264.9" cy="287.7" r="2.5" fill="#334155" stroke="#94a3b8" stroke-width="1" />
+    <circle cx="395.1" cy="347.3" r="2.5" fill="#1e293b" stroke="#64748b" stroke-width="1" />
+    <circle cx="264.9" cy="422.1" r="2.5" fill="#1e293b" stroke="#64748b" stroke-width="1" />
+
+
+    <!-- ==================== TOP FACE (Crafting 3x3 Grid) ==================== -->
+    <polygon points="256,110 404,195 256,280 108,195" fill="url(#topWood)" stroke="#542e0d" stroke-width="2" stroke-linejoin="round" />
+
+    <!-- Top Border Framing (Outer Thick Oak Edge) -->
+    <polygon points="256,123.6 380.3,195 256,266.4 131.7,195" fill="#a66e31" stroke="#633910" stroke-width="1.5" />
+
+    <!-- Subtle Wood Plank Texture Lines on Top -->
+    <line x1="207.2" y1="138.1" x2="355.2" y2="223.1" stroke="#8a5420" stroke-width="1.2" opacity="0.6" />
+    <line x1="158.3" y1="166.1" x2="306.3" y2="251.1" stroke="#8a5420" stroke-width="1.2" opacity="0.6" />
+
+    <!-- 3x3 Crafting Grid Slots -->
+    
+      <!-- Grid Slot [0,0] -->
+      <polygon points="256,133.8 285.6,150.8 256,167.8 226.4,150.8" fill="url(#slotGrad)" stroke="#784617" stroke-width="1.5"  stroke-linejoin="round" />
+      <polygon points="256,133.8 285.6,150.8 256,167.8 226.4,150.8" fill="none" stroke="#241203" stroke-width="0.8" opacity="0.6" />
+      
+      <!-- Grid Slot [1,0] -->
+      <polygon points="294.5,155.9 324.1,172.9 294.5,189.9 264.9,172.9" fill="url(#slotGrad)" stroke="#784617" stroke-width="1.5"  stroke-linejoin="round" />
+      <polygon points="294.5,155.9 324.1,172.9 294.5,189.9 264.9,172.9" fill="none" stroke="#241203" stroke-width="0.8" opacity="0.6" />
+      
+      <!-- Grid Slot [2,0] -->
+      <polygon points="333,178 362.6,195 333,212 303.4,195" fill="url(#slotGrad)" stroke="#784617" stroke-width="1.5"  stroke-linejoin="round" />
+      <polygon points="333,178 362.6,195 333,212 303.4,195" fill="none" stroke="#241203" stroke-width="0.8" opacity="0.6" />
+      
+      <!-- Grid Slot [0,1] -->
+      <polygon points="217.5,155.9 247.1,172.9 217.5,189.9 187.9,172.9" fill="url(#slotGrad)" stroke="#784617" stroke-width="1.5"  stroke-linejoin="round" />
+      <polygon points="217.5,155.9 247.1,172.9 217.5,189.9 187.9,172.9" fill="none" stroke="#241203" stroke-width="0.8" opacity="0.6" />
+      
+      <!-- Grid Slot [1,1] -->
+      <polygon points="256,178 285.6,195 256,212 226.4,195" fill="url(#centerSlotGrad)" stroke="#38bdf8" stroke-width="2" filter="url(#softGlow)" stroke-linejoin="round" />
+      <polygon points="256,178 285.6,195 256,212 226.4,195" fill="none" stroke="#241203" stroke-width="0.8" opacity="0.6" />
+      
+      <!-- Grid Slot [2,1] -->
+      <polygon points="294.5,200.1 324.1,217.1 294.5,234.1 264.9,217.1" fill="url(#slotGrad)" stroke="#784617" stroke-width="1.5"  stroke-linejoin="round" />
+      <polygon points="294.5,200.1 324.1,217.1 294.5,234.1 264.9,217.1" fill="none" stroke="#241203" stroke-width="0.8" opacity="0.6" />
+      
+      <!-- Grid Slot [0,2] -->
+      <polygon points="179,178 208.6,195 179,212 149.4,195" fill="url(#slotGrad)" stroke="#784617" stroke-width="1.5"  stroke-linejoin="round" />
+      <polygon points="179,178 208.6,195 179,212 149.4,195" fill="none" stroke="#241203" stroke-width="0.8" opacity="0.6" />
+      
+      <!-- Grid Slot [1,2] -->
+      <polygon points="217.5,200.1 247.1,217.1 217.5,234.1 187.9,217.1" fill="url(#slotGrad)" stroke="#784617" stroke-width="1.5"  stroke-linejoin="round" />
+      <polygon points="217.5,200.1 247.1,217.1 217.5,234.1 187.9,217.1" fill="none" stroke="#241203" stroke-width="0.8" opacity="0.6" />
+      
+      <!-- Grid Slot [2,2] -->
+      <polygon points="256,222.2 285.6,239.2 256,256.2 226.4,239.2" fill="url(#slotGrad)" stroke="#784617" stroke-width="1.5"  stroke-linejoin="round" />
+      <polygon points="256,222.2 285.6,239.2 256,256.2 226.4,239.2" fill="none" stroke="#241203" stroke-width="0.8" opacity="0.6" />
+      
+
+    <!-- Center Slot Glowing Crafting Core (AI Chip / Blue Gem Spark) -->
+    <g filter="url(#softGlow)">
+      <!-- Inner Diamond in Center Slot -->
+      <polygon points="256,186.5 270.8,195 256,203.5 241.2,195" fill="#38bdf8" stroke="#ffffff" stroke-width="1.5" />
+      <circle cx="256" cy="195" r="4" fill="#ffffff" />
+    </g>
+
+    <!-- Top Corner Reinforcements & Nails -->
+    <circle cx="256" cy="118.5" r="3" fill="#422207" stroke="#783d0e" stroke-width="1" />
+    <circle cx="389.2" cy="195" r="3" fill="#422207" stroke="#783d0e" stroke-width="1" />
+    <circle cx="256" cy="271.5" r="3" fill="#422207" stroke="#783d0e" stroke-width="1" />
+    <circle cx="122.8" cy="195" r="3" fill="#422207" stroke="#783d0e" stroke-width="1" />
+
+    <!-- Top Highlight Bevel Line (Crisp Sunlight Edge) -->
+    <polyline points="108,195 256,110 404,195" fill="none" stroke="#fcd34d" stroke-width="2.5" opacity="0.75" stroke-linecap="round" />
+    <line x1="108" y1="195" x2="256" y2="280" stroke="#fed7aa" stroke-width="1.5" opacity="0.4" />
+    
+    <!-- Central Ridge Highlight between left & right face -->
+    <line x1="256" y1="280" x2="256" y2="440" stroke="#fbbf24" stroke-width="1.5" opacity="0.3" />
+
+  </g>
+
+  <!-- Sparkle Particle Effects around Crafting Table -->
+  <g filter="url(#softGlow)">
+    <circle cx="396" cy="118" r="4.5" fill="#38bdf8" />
+    <circle cx="396" cy="118" r="2" fill="#ffffff" />
+    
+    <circle cx="112" cy="142" r="3" fill="#60a5fa" opacity="0.8" />
+    <circle cx="380" cy="380" r="3.5" fill="#38bdf8" opacity="0.8" />
+    <circle cx="106" cy="340" r="3" fill="#a78bfa" opacity="0.7" />
+  </g>
+</svg>
