@@ -46,6 +46,7 @@ interface WorkspaceState {
   setProjectDialogOpen: (open: boolean) => void;
   selectProject: (id: string) => Promise<void>;
   addProject: (name: string, path: string, agentPreset: string) => Promise<void>;
+  reorderProjects: (fromId: string, toIndex: number) => Promise<void>;
   closeProject: (id: string) => Promise<void>;
   removeProject: (id: string) => Promise<void>;
   updateProjectPreset: (id: string, agentPreset: string) => Promise<void>;
@@ -241,6 +242,28 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     }));
     const latest = get().config?.projects.find((p) => p.id === project.id) ?? project;
     await get().spawnForProject(latest);
+  },
+
+  reorderProjects: async (fromId, toIndex) => {
+    const { config } = get();
+    if (!config) return;
+    const fromIndex = config.projects.findIndex((p) => p.id === fromId);
+    if (fromIndex < 0 || config.projects.length === 0) return;
+    const clamped = Math.max(0, Math.min(toIndex, config.projects.length - 1));
+    if (fromIndex === clamped) return;
+    const prev = config.projects;
+    const projects = [...prev];
+    const [moved] = projects.splice(fromIndex, 1);
+    if (!moved) return;
+    projects.splice(clamped, 0, moved);
+    const next: AppConfig = { ...config, projects };
+    set({ config: next });
+    const saved = await get().persist(next);
+    if (!saved) {
+      set((s) => ({
+        config: s.config ? { ...s.config, projects: prev } : { ...config, projects: prev },
+      }));
+    }
   },
 
   closeProject: async (id) => {
