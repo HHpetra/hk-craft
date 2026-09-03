@@ -4,7 +4,7 @@ use std::path::Path;
 use std::sync::OnceLock;
 use std::time::SystemTime;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::error::AppResult;
 
@@ -17,10 +17,10 @@ struct CursorMeta {
     created_at_ms: Option<u64>,
 }
 
-#[derive(Debug, Clone)]
-struct Found {
-    id: String,
-    updated_ms: u64,
+#[derive(Debug, Clone, Serialize)]
+pub struct DiscoveredSession {
+    pub id: String,
+    pub updated_ms: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -117,20 +117,28 @@ fn file_mtime_ms(path: &Path) -> u64 {
         .unwrap_or(0)
 }
 
-fn consider(best: &mut Option<Found>, id: String, updated_ms: u64) {
-    let better = match best {
-        None => true,
-        Some(current) => updated_ms >= current.updated_ms,
-    };
-    if better {
-        *best = Some(Found { id, updated_ms });
+fn collect_session(out: &mut Vec<DiscoveredSession>, id: String, updated_ms: u64) {
+    if id.is_empty() {
+        return;
     }
+    if let Some(existing) = out.iter_mut().find(|session| session.id == id) {
+        if updated_ms > existing.updated_ms {
+            existing.updated_ms = updated_ms;
+        }
+        return;
+    }
+    out.push(DiscoveredSession { id, updated_ms });
 }
 
-pub fn discover_cursor_chats(chats_root: &Path, cwd: &str) -> Option<String> {
-    let mut best: Option<Found> = None;
+fn sort_sessions(mut sessions: Vec<DiscoveredSession>) -> Vec<DiscoveredSession> {
+    sessions.sort_by(|a, b| b.updated_ms.cmp(&a.updated_ms).then(a.id.cmp(&b.id)));
+    sessions
+}
+
+pub fn discover_cursor_chats(chats_root: &Path, cwd: &str) -> Vec<DiscoveredSession> {
+    let mut found = Vec::new();
     let Ok(hashes) = fs::read_dir(chats_root) else {
-        return None;
+        return found;
     };
     for hash in hashes.flatten() {
         let hash_path = hash.path();
@@ -163,18 +171,18 @@ pub fn discover_cursor_chats(chats_root: &Path, cwd: &str) -> Option<String> {
                 .updated_at_ms
                 .or(meta.created_at_ms)
                 .unwrap_or_else(|| file_mtime_ms(&meta_path));
-            consider(&mut best, id, updated);
+            collect_session(&mut found, id, updated);
         }
     }
-    best.map(|f| f.id)
+    sort_sessions(found)
 }
 
-fn discover_cursor_transcripts(projects_root: &Path, cwd: &str) -> Option<String> {
+fn discover_cursor_transcripts(projects_root: &Path, cwd: &str) -> Vec<DiscoveredSession> {
     let slug = cursor_project_slug(cwd);
     let transcripts = projects_root.join(slug).join("agent-transcripts");
-    let mut best: Option<Found> = None;
+    let mut found = Vec::new();
     let Ok(entries) = fs::read_dir(&transcripts) else {
-        return None;
+        return found;
     };
     for entry in entries.flatten() {
         let path = entry.path();
@@ -182,15 +190,15 @@ fn discover_cursor_transcripts(projects_root: &Path, cwd: &str) -> Option<String
             continue;
         }
         let id = entry.file_name().to_string_lossy().to_string();
-        consider(&mut best, id, file_mtime_ms(&path));
+        collect_session(&mut found, id, file_mtime_ms(&path));
     }
-    best.map(|f| f.id)
+    found
 }
 
-fn discover_claude(projects_root: &Path, cwd: &str) -> Option<String> {
+fn discover_claude(projects_root: &Path, cwd: &str) -> Vec<DiscoveredSession> {
     let slug = claude_project_slug(cwd);
     let dir = projects_root.join(&slug);
-    let mut best: Option<Found> = None;
+    let mut found = Vec::new();
     let mut scan = |folder: &Path| {
         let Ok(entries) = fs::read_dir(folder) else {
             return;
@@ -204,15 +212,12 @@ fn discover_claude(projects_root: &Path, cwd: &str) -> Option<String> {
                 .file_stem()
                 .map(|s| s.to_string_lossy().to_string())
                 .unwrap_or_default();
-            if id.is_empty() {
-                continue;
-            }
-            consider(&mut best, id, file_mtime_ms(&path));
+            collect_session(&mut found, id, file_mtime_ms(&path));
         }
     };
     scan(&dir);
     scan(&dir.join("sessions"));
-    best.map(|f| f.id)
+    sort_sessions(found)
 }
 
 #[derive(Deserialize)]
@@ -260,8 +265,8 @@ fn read_codex_meta(path: &Path) -> Option<(String, String)> {
     Some((id, cwd))
 }
 
-pub fn discover_codex(sessions_root: &Path, cwd: &str) -> Option<String> {
-    let mut best: Option<Found> = None;
+pub fn discover_codex(sessions_root: &Path, cwd: &str) -> Vec<DiscoveredSession> {
+    let mut found = Vec::new();
     walk_files(sessions_root, &mut |path| {
         let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
         if !name.starts_with("rollout-") || !name.ends_with(".jsonl") {
@@ -273,9 +278,9 @@ pub fn discover_codex(sessions_root: &Path, cwd: &str) -> Option<String> {
         if !paths_match(&meta_cwd, cwd) {
             return;
         }
-        consider(&mut best, id, file_mtime_ms(path));
+        collect_session(&mut found, id, file_mtime_ms(path));
     });
-    best.map(|f| f.id)
+    sort_sessions(found)
 }
 
 fn codex_sessions_dir(home: &Path) -> std::path::PathBuf {
@@ -285,24 +290,28 @@ fn codex_sessions_dir(home: &Path) -> std::path::PathBuf {
         .join("sessions")
 }
 
-pub fn discover_latest(command: &str, cwd: &str) -> Option<String> {
-    let home = dirs::home_dir()?;
+pub fn discover_all(command: &str, cwd: &str) -> Vec<DiscoveredSession> {
+    let Some(home) = dirs::home_dir() else {
+        return Vec::new();
+    };
     match spec_for(command).and_then(|spec| spec.discover.as_deref()) {
         Some("cursor") => {
-            let from_chats = discover_cursor_chats(&home.join(".cursor").join("chats"), cwd);
-            let from_transcripts =
-                discover_cursor_transcripts(&home.join(".cursor").join("projects"), cwd);
-            from_chats.or(from_transcripts)
+            let mut found = discover_cursor_chats(&home.join(".cursor").join("chats"), cwd);
+            for session in discover_cursor_transcripts(&home.join(".cursor").join("projects"), cwd)
+            {
+                collect_session(&mut found, session.id, session.updated_ms);
+            }
+            sort_sessions(found)
         }
         Some("claude") => discover_claude(&home.join(".claude").join("projects"), cwd),
         Some("codex") => discover_codex(&codex_sessions_dir(&home), cwd),
-        _ => None,
+        _ => Vec::new(),
     }
 }
 
 #[tauri::command]
-pub fn discover_agent_session(command: String, cwd: String) -> AppResult<Option<String>> {
-    Ok(discover_latest(&command, &cwd))
+pub fn discover_agent_sessions(command: String, cwd: String) -> AppResult<Vec<DiscoveredSession>> {
+    Ok(discover_all(&command, &cwd))
 }
 
 #[cfg(test)]
@@ -341,8 +350,12 @@ mod tests {
         assert_eq!(spec_for("opencode").and_then(|s| s.discover.clone()), None);
     }
 
+    fn ids(sessions: &[DiscoveredSession]) -> Vec<&str> {
+        sessions.iter().map(|session| session.id.as_str()).collect()
+    }
+
     #[test]
-    fn codex_rollouts_pick_latest_for_cwd() {
+    fn codex_rollouts_list_matching_cwd_newest_first() {
         let root = std::env::temp_dir().join(format!("aw-codex-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         let old_dir = root.join("2026").join("09").join("01");
@@ -365,12 +378,13 @@ mod tests {
             r#"{"type":"session_meta","payload":{"id":"new-id","cwd":"C:\\work\\app"}}"#,
         )
         .unwrap();
-        assert_eq!(discover_codex(&root, r"C:\work\app").as_deref(), Some("new-id"));
+        let found = discover_codex(&root, r"C:\work\app");
+        assert_eq!(ids(&found), vec!["new-id", "old-id"]);
         let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
-    fn cursor_chats_pick_latest_for_cwd() {
+    fn cursor_chats_list_matching_cwd_newest_first() {
         let root = std::env::temp_dir().join(format!("aw-chats-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         let a = root.join("hash").join("chat-old");
@@ -393,7 +407,8 @@ mod tests {
             r#"{"cwd":"C:\\work\\other","updatedAtMs":99}"#,
         )
         .unwrap();
-        assert_eq!(discover_cursor_chats(&root, r"C:\work\app").as_deref(), Some("chat-new"));
+        let found = discover_cursor_chats(&root, r"C:\work\app");
+        assert_eq!(ids(&found), vec!["chat-new", "chat-old"]);
         let _ = fs::remove_dir_all(&root);
     }
 }

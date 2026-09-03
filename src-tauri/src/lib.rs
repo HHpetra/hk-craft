@@ -56,7 +56,7 @@ pub fn run() {
             pty::pty_resize,
             pty::pty_kill,
             pty::pty_list,
-            session::discover_agent_session,
+            session::discover_agent_sessions,
             runner::delete_runner_persist,
             update::fetch_latest_release_tag,
         ])

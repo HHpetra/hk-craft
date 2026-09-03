@@ -58,10 +58,26 @@ export type LiveAgentTarget = {
   paneId: string;
   command: string;
   cwd: string;
+  currentSessionId: string | null;
 };
 
 function isLive(status: SessionStatus | undefined) {
   return status === "running" || status === "waiting";
+}
+
+export function agentTargets(project: Project, presets: AgentPreset[]): LiveAgentTarget[] {
+  const targets: LiveAgentTarget[] = [];
+  for (const pane of project.panes ?? []) {
+    if (pane.kind !== "agent") continue;
+    targets.push({
+      projectId: project.id,
+      paneId: pane.id,
+      command: resolveAgentCommand(pane, project, presets),
+      cwd: project.path,
+      currentSessionId: pane.agent_session_id ?? null,
+    });
+  }
+  return targets;
 }
 
 export function liveAgentTargets(
@@ -74,16 +90,12 @@ export function liveAgentTargets(
   const targets: LiveAgentTarget[] = [];
   for (const project of projects) {
     if (!opened.has(project.id)) continue;
-    for (const pane of project.panes ?? []) {
-      if (pane.kind !== "agent") continue;
+    for (const target of agentTargets(project, presets)) {
+      const pane = project.panes?.find((item) => item.id === target.paneId);
+      if (!pane) continue;
       const sid = paneSessionId(project.id, pane);
       if (!sid || !isLive(sessionStatus[sid])) continue;
-      targets.push({
-        projectId: project.id,
-        paneId: pane.id,
-        command: resolveAgentCommand(pane, project, presets),
-        cwd: project.path,
-      });
+      targets.push(target);
     }
   }
   return targets;

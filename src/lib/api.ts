@@ -69,6 +69,9 @@ export function ptyList() {
   return invoke<string[]>("pty_list");
 }
 
-export function discoverAgentSession(command: string, cwd: string) {
-  return invoke<string | null>("discover_agent_session", { command, cwd });
+export function discoverAgentSessions(command: string, cwd: string) {
+  return invoke<Array<{ id: string; updated_ms: number }>>("discover_agent_sessions", {
+    command,
+    cwd,
+  }).then((rows) => rows.map((row) => ({ id: row.id, updatedMs: row.updated_ms })));
 }

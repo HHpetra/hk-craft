@@ -10,9 +10,11 @@ import type {
   SpawnResult,
   WorkspaceLayout,
 } from "../types";
-import { liveAgentTargets } from "../lib/agentProtocol";
-import { checkDir, deleteRunnerPersist, discoverAgentSession, loadConfig, ptyKill, ptySpawn, saveConfig } from "../lib/api";
-import { pathsEqual } from "../lib/format";
+import { agentTargets, liveAgentTargets } from "../lib/agentProtocol";
+import { planCapturedSessions, type SessionAssignment } from "../lib/agentSessionAssign";
+import { checkDir, deleteRunnerPersist, discoverAgentSessions, loadConfig, ptyKill, ptySpawn, saveConfig } from "../lib/api";
+import { pathsEqual, sessionId } from "../lib/format";
+import { getPtyActivity } from "../lib/ptyActivity";
 import { agentPanesToRestart, planPaneLaunch, type AgentRestartReason, type PaneLaunchPlan } from "../lib/paneLaunch";
 import { createPane, neighborPaneId, normalizeLayout, paneSessionId, projectSessionIds, terminalPanes, withDefaultWorkspace } from "../lib/panes";
 import {
@@ -77,6 +79,7 @@ interface WorkspaceState {
   restartPane: (projectId: string, paneId: string) => Promise<void>;
   restartOpenedAgentsForPresetChange: (prevPresets: AgentPreset[], nextPresets: AgentPreset[]) => void;
   rememberAgentSession: (projectId: string, paneId: string, chatId: string) => Promise<void>;
+  captureOpenedAgentSessions: () => Promise<void>;
   snapshotOpenedSessions: () => Promise<void>;
   setTheme: (theme: "dark" | "light") => Promise<void>;
   setResumeOnStart: (resume: boolean) => Promise<void>;
@@ -117,6 +120,35 @@ function patchProject(config: AppConfig, projectId: string, patch: Partial<Proje
     ...config,
     projects: config.projects.map((project) => (project.id === projectId ? { ...project, ...patch } : project)),
   };
+}
+
+function paneLastUserWrite(projectId: string, paneId: string) {
+  return getPtyActivity(sessionId(projectId, "agent", paneId)).lastUserWrite;
+}
+
+function applySessionAssignments(config: AppConfig, assignments: SessionAssignment[]): AppConfig | null {
+  if (assignments.length === 0) return null;
+  const byProject = new Map<string, Map<string, string>>();
+  for (const assignment of assignments) {
+    const panes = byProject.get(assignment.projectId) ?? new Map<string, string>();
+    panes.set(assignment.paneId, assignment.sessionId);
+    byProject.set(assignment.projectId, panes);
+  }
+  let changed = false;
+  const projects = config.projects.map((project) => {
+    const paneUpdates = byProject.get(project.id);
+    if (!paneUpdates) return project;
+    let projectChanged = false;
+    const panes = project.panes.map((pane) => {
+      const nextId = paneUpdates.get(pane.id);
+      if (!nextId || pane.agent_session_id === nextId) return pane;
+      projectChanged = true;
+      changed = true;
+      return { ...pane, agent_session_id: nextId };
+    });
+    return projectChanged ? { ...project, panes } : project;
+  });
+  return changed ? { ...config, projects } : null;
 }
 
 type WorkspaceGet = () => WorkspaceState;
@@ -607,21 +639,36 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   spawnForProject: async (project) => {
     const { config } = get();
     if (!config) return;
-    let agentSeen = project.agent_seen;
     const resumeOnStart = config.settings.resume_on_start !== false;
-    for (const pane of terminalPanes(project)) {
-      const sid = paneSessionId(project.id, pane);
+    if (resumeOnStart) {
+      const assignments = await planCapturedSessions(
+        agentTargets(project, config.agent_presets),
+        discoverAgentSessions,
+        () => 0,
+        "resume",
+      );
+      const latest = get().config;
+      if (latest) {
+        const next = applySessionAssignments(latest, assignments);
+        if (next) await get().persist(next);
+      }
+    }
+    const current = get().config?.projects.find((item) => item.id === project.id) ?? project;
+    const presets = get().config?.agent_presets ?? config.agent_presets;
+    let agentSeen = current.agent_seen;
+    for (const pane of terminalPanes(current)) {
+      const sid = paneSessionId(current.id, pane);
       const plan = planPaneLaunch({
         mode: "ensure",
-        project,
+        project: current,
         pane,
-        presets: config.agent_presets,
+        presets,
         resumeOnStart,
         status: sid ? get().sessionStatus[sid] : undefined,
         agentSeen,
       });
       if (!plan || plan.action === "skip") continue;
-      const ok = await executePaneLaunch(get, plan, project.id, pane.id);
+      const ok = await executePaneLaunch(get, plan, current.id, pane.id);
       if (ok && plan.markAgentSeen) agentSeen = true;
     }
   },
@@ -652,26 +699,28 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   rememberAgentSession: async (projectId, paneId, chatId) => {
     const { config } = get();
     if (!config) return;
-    const project = config.projects.find((p) => p.id === projectId);
-    const pane = project?.panes.find((item) => item.id === paneId);
-    if (!project || !pane || pane.agent_session_id === chatId) return;
-    const panes = project.panes.map((item) =>
-      item.id === paneId ? { ...item, agent_session_id: chatId } : item,
+    const next = applySessionAssignments(config, [{ projectId, paneId, sessionId: chatId }]);
+    if (next) await get().persist(next);
+  },
+
+  captureOpenedAgentSessions: async () => {
+    const { config, openedProjectIds } = get();
+    if (!config) return;
+    const targets = liveAgentTargets(
+      config.projects,
+      openedProjectIds,
+      get().sessionStatus,
+      config.agent_presets,
     );
-    await get().persist(patchProject(config, projectId, { panes }));
+    const assignments = await planCapturedSessions(targets, discoverAgentSessions, paneLastUserWrite);
+    const latest = get().config;
+    if (!latest) return;
+    const next = applySessionAssignments(latest, assignments);
+    if (next) await get().persist(next);
   },
 
   snapshotOpenedSessions: async () => {
-    const { config, openedProjectIds } = get();
-    if (!config) return;
-    for (const target of liveAgentTargets(config.projects, openedProjectIds, get().sessionStatus, config.agent_presets)) {
-      try {
-        const found = await discoverAgentSession(target.command, target.cwd);
-        if (found) await get().rememberAgentSession(target.projectId, target.paneId, found);
-      } catch {
-        // discovery is best-effort
-      }
-    }
+    await get().captureOpenedAgentSessions();
     const latest = get().config;
     const activeProjectId = get().activeProjectId;
     if (!latest || latest.settings.active_project_id === activeProjectId) return;

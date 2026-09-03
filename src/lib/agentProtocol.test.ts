@@ -53,7 +53,7 @@ describe("agent protocol table", () => {
   });
 
   it("lists only live agent panes in opened projects", () => {
-    const agent: WorkspacePane = { id: "a1", kind: "agent", preset_id: "cursor" };
+    const agent: WorkspacePane = { id: "a1", kind: "agent", preset_id: "cursor", agent_session_id: "chat-a" };
     const runner: WorkspacePane = { id: "r1", kind: "runner" };
     const open = project({ id: "open", panes: [agent, runner] });
     const closed = project({ id: "closed", panes: [agent] });
@@ -64,7 +64,13 @@ describe("agent protocol table", () => {
       [cursor],
     );
     expect(targets).toEqual([
-      { projectId: "open", paneId: "a1", command: "cursor-agent", cwd: "C:\\work" },
+      {
+        projectId: "open",
+        paneId: "a1",
+        command: "cursor-agent",
+        cwd: "C:\\work",
+        currentSessionId: "chat-a",
+      },
     ]);
   });
 });
