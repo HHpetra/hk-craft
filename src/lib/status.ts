@@ -10,9 +10,14 @@ export function projectBadge(...statuses: Array<SessionStatus | undefined>): Ses
 
 export function statusDotClass(status: SessionStatus | undefined) {
   if (status === "running") return "bg-emerald-500";
-  if (status === "waiting") return "bg-sky-500";
+  if (status === "waiting") return "bg-sky-400";
   if (status === "error") return "bg-red-500";
-  return "bg-zinc-500";
+  return "bg-zinc-600";
+}
+
+export function statusDotExtra(status: SessionStatus | undefined) {
+  if (status === "running") return "status-running";
+  return "";
 }
 
 export function sessionKindLabel(kind: "agent" | "runner") {

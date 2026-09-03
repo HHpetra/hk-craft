@@ -14,10 +14,14 @@ export function Toast() {
   if (!notice) return null;
 
   return (
-    <div className="fixed bottom-4 left-1/2 z-50 max-w-[80vw] -translate-x-1/2 rounded-md border border-line bg-surface-elevated px-3 py-2 text-ink shadow-lg">
+    <div className="toast-enter fixed bottom-4 left-1/2 z-50 max-w-[80vw] -translate-x-1/2 rounded-lg border border-line bg-surface-elevated px-3.5 py-2.5 text-ink shadow-xl">
       <div className="flex items-start gap-3">
-        <span className="break-all">{notice}</span>
-        <button type="button" className="text-ink-subtle hover:text-ink" onClick={() => setNotice(null)}>
+        <span className="break-all leading-relaxed">{notice}</span>
+        <button
+          type="button"
+          className="shrink-0 text-[11px] text-ink-subtle hover:text-ink"
+          onClick={() => setNotice(null)}
+        >
           关闭
         </button>
       </div>

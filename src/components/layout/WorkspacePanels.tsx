@@ -144,8 +144,8 @@ export function WorkspacePanels() {
 
   if (!project) {
     return (
-      <div className="flex h-full items-center justify-center text-ink-subtle">
-        请先添加一个项目
+      <div className="flex h-full flex-col items-center justify-center gap-2 text-ink-subtle">
+        <span className="text-[13px]">请先在左侧添加一个项目</span>
       </div>
     );
   }

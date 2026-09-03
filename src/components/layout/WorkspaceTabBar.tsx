@@ -109,15 +109,16 @@ export function WorkspaceTabBar() {
   return (
     <div
       ref={rootRef}
-      className="relative z-20 flex h-10 shrink-0 items-center gap-1 border-b border-line bg-surface px-2"
+      className="relative z-20 flex h-9 shrink-0 items-center gap-1 border-b border-line bg-surface-header px-2"
     >
-      <div className="flex min-w-0 items-center gap-1">
-        <div className="flex min-w-0 items-center gap-1 overflow-x-auto">
+      <div className="flex min-w-0 items-center gap-0.5">
+        <div className="flex min-w-0 items-center gap-0.5 overflow-x-auto">
         {panes.map((pane) => {
           const Icon = paneIcon(pane);
           const sid = pane.kind === "explorer" ? null : sessionId(project!.id, pane.kind, pane.id);
           const dragging = pane.id === draggingId;
           const line = dropLine?.id === pane.id ? dropLine.place : null;
+          const isActive = activeId === pane.id;
           return (
             <button
               key={pane.id}
@@ -139,23 +140,23 @@ export function WorkspaceTabBar() {
                 void setActivePane(pane.id);
               }}
               className={cn(
-                "group relative flex shrink-0 cursor-grab touch-none select-none items-center gap-1.5 rounded-md px-2.5 py-1 text-ink-muted hover:bg-hover hover:text-ink",
-                activeId === pane.id && "bg-active text-ink",
+                "group relative flex shrink-0 cursor-grab touch-none select-none items-center gap-1.5 rounded px-2 py-1 text-[12px] text-ink-muted hover:bg-hover hover:text-ink",
+                isActive && "bg-active text-ink",
                 dragging && "cursor-grabbing opacity-50",
               )}
             >
               {line === "before" && (
-                <span className="pointer-events-none absolute inset-y-1 left-px z-10 w-px bg-ink" />
+                <span className="pointer-events-none absolute inset-y-1.5 left-px z-10 w-px bg-accent" />
               )}
-              <Icon size={14} className="pointer-events-none" />
-              <span className="pointer-events-none max-w-36 truncate">{paneTitle(pane, panes, presets)}</span>
+              <Icon size={13} className="pointer-events-none shrink-0" />
+              <span className="pointer-events-none max-w-32 truncate">{paneTitle(pane, panes, presets)}</span>
               {sid && <StatusDot status={status[sid]} className="pointer-events-none" />}
               <span
                 role="button"
                 tabIndex={0}
                 data-pane-close=""
                 title="关闭面板"
-                className="ml-0.5 hidden rounded p-0.5 text-ink-subtle hover:text-ink group-hover:block"
+                className="ml-0.5 hidden shrink-0 rounded p-0.5 text-ink-subtle hover:text-ink group-hover:flex"
                 onPointerDown={(event) => event.stopPropagation()}
                 onClick={(event) => {
                   event.stopPropagation();
@@ -168,10 +169,10 @@ export function WorkspaceTabBar() {
                   void closePane(pane.id);
                 }}
               >
-                <X size={12} />
+                <X size={11} />
               </span>
               {line === "after" && (
-                <span className="pointer-events-none absolute inset-y-1 right-px z-10 w-px bg-ink" />
+                <span className="pointer-events-none absolute inset-y-1.5 right-px z-10 w-px bg-accent" />
               )}
             </button>
           );
@@ -183,35 +184,35 @@ export function WorkspaceTabBar() {
             type="button"
             title="新增面板"
             className={cn(
-              "flex items-center rounded-md p-1.5 text-ink-muted hover:bg-hover hover:text-ink",
+              "flex items-center rounded p-1.5 text-ink-subtle hover:bg-hover hover:text-ink",
               menuOpen && "bg-active text-ink",
             )}
             onClick={() => setMenuOpen((open) => !open)}
           >
-            <Plus size={14} />
+            <Plus size={13} />
           </button>
           {menuOpen && (
-            <div className="absolute left-0 top-full z-50 mt-1 min-w-44 rounded-md border border-line bg-surface-elevated py-1 shadow-lg">
+            <div className="absolute left-0 top-full z-50 mt-1 min-w-44 rounded-lg border border-line bg-surface-elevated py-1 shadow-xl">
               <button
                 type="button"
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-ink-muted hover:bg-hover hover:text-ink"
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] text-ink-muted hover:bg-hover hover:text-ink"
                 onClick={() => {
                   setMenuOpen(false);
                   void addPane("explorer");
                 }}
               >
-                <FolderTree size={14} />
+                <FolderTree size={13} />
                 文件资源管理器
               </button>
               <button
                 type="button"
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-ink-muted hover:bg-hover hover:text-ink"
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] text-ink-muted hover:bg-hover hover:text-ink"
                 onClick={() => {
                   setMenuOpen(false);
                   void addPane("runner");
                 }}
               >
-                <Terminal size={14} />
+                <Terminal size={13} />
                 运行终端
               </button>
               {presets.length > 0 && <div className="my-1 border-t border-line" />}
@@ -219,13 +220,13 @@ export function WorkspaceTabBar() {
                 <button
                   key={preset.id}
                   type="button"
-                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-ink-muted hover:bg-hover hover:text-ink"
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] text-ink-muted hover:bg-hover hover:text-ink"
                   onClick={() => {
                     setMenuOpen(false);
                     void addPane("agent", preset.id);
                   }}
                 >
-                  <Bot size={14} />
+                  <Bot size={13} />
                   {preset.name}
                 </button>
               ))}
@@ -234,7 +235,7 @@ export function WorkspaceTabBar() {
         </div>
         )}
       </div>
-      <div className="ml-auto flex shrink-0 items-center gap-1 pl-2">
+      <div className="ml-auto flex shrink-0 items-center gap-0.5 border-l border-line pl-2">
         {layouts.map(({ id, label, shortcut, icon: Icon }) => (
           <button
             key={id}
@@ -243,11 +244,11 @@ export function WorkspaceTabBar() {
             disabled={!project}
             onClick={() => void setLayout(id)}
             className={cn(
-              "flex items-center rounded-md p-1.5 text-ink-muted hover:bg-hover hover:text-ink disabled:opacity-40",
+              "flex items-center rounded p-1.5 text-ink-subtle hover:bg-hover hover:text-ink disabled:opacity-30",
               layout === id && project && "bg-active text-ink",
             )}
           >
-            <Icon size={14} />
+            <Icon size={13} />
           </button>
         ))}
       </div>
