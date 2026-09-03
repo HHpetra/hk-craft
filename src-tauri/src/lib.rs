@@ -51,6 +51,7 @@ pub fn run() {
             fs::open_url,
             fs::check_dir,
             clipboard::clipboard_read_text,
+            clipboard::clipboard_write_text,
             pty::pty_spawn,
             pty::pty_write,
             pty::pty_resize,

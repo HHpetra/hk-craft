@@ -51,6 +51,10 @@ export function clipboardReadText() {
   return invoke<string>("clipboard_read_text");
 }
 
+export function clipboardWriteText(text: string) {
+  return invoke<void>("clipboard_write_text", { text });
+}
+
 export function ptyWrite(sessionId: string, data: string) {
   // OSC replies are terminal protocol, not keystrokes.
   if (!data.startsWith("\x1b]")) notePtyUserInput(sessionId);

@@ -137,6 +137,8 @@ a {
 
 .xterm .xterm-screen canvas {
   z-index: 0;
+  /* WebView treats a hit-tested canvas as an image ("Copy image"). */
+  pointer-events: none;
 }
 
 .xterm .xterm-helper-textarea {

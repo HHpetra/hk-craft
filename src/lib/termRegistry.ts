@@ -3,9 +3,10 @@ import type { IDisposable } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { listen } from "@tauri-apps/api/event";
-import { ptyResize, ptyWrite, clipboardReadText } from "./api";
+import { ptyResize, ptyWrite, clipboardReadText, clipboardWriteText } from "./api";
 import { attachImeAnchor } from "./imeAnchor";
 import { parseSessionId } from "./format";
+import { shouldCopySelection } from "./terminalCopy";
 import { hexToOscRgb, normalizeTheme, xtermThemes, type XtermTheme } from "./theme";
 import { primaryTerminalFont, setPreferredTerminalFont, terminalFontFamily } from "./terminalFonts";
 import type { PtyOutput } from "../types";
@@ -18,6 +19,7 @@ type RegistryEntry = {
   osc: IDisposable[];
   composing: boolean;
   imeDetach?: () => void;
+  copyDetach?: () => void;
   fitted?: boolean;
 };
 
@@ -230,14 +232,44 @@ async function readClipboardText() {
   }
 }
 
+async function writeClipboardText(text: string) {
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+    return;
+  } catch {
+    // WebView often denies clipboard-write without an extra permission
+  }
+  try {
+    await clipboardWriteText(text);
+  } catch {
+    // keep the selection; user can retry
+  }
+}
+
+function copyTerminalSelection(term: Terminal, clear: boolean) {
+  const text = term.getSelection();
+  if (!text) return;
+  void writeClipboardText(text).then(() => {
+    if (clear) term.clearSelection();
+  });
+}
+
 function bindTerminalInput(entry: RegistryEntry) {
-  const { term } = entry;
+  const { term, host } = entry;
   term.attachCustomKeyEventHandler((event) => {
     if (isPasteShortcut(event)) {
       event.preventDefault();
       void readClipboardText().then((text) => {
         if (text) term.paste(text);
       });
+      return false;
+    }
+    if (shouldCopySelection(event, term.hasSelection())) {
+      if (event.type === "keydown") {
+        event.preventDefault();
+        copyTerminalSelection(term, false);
+      }
       return false;
     }
     if (isNewlineShortcut(event)) {
@@ -250,6 +282,14 @@ function bindTerminalInput(entry: RegistryEntry) {
     }
     return true;
   });
+
+  const onContextMenu = (event: Event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (term.hasSelection()) copyTerminalSelection(term, true);
+  };
+  host.addEventListener("contextmenu", onContextMenu, true);
+  entry.copyDetach = () => host.removeEventListener("contextmenu", onContextMenu, true);
 
   const textarea = term.textarea;
   if (!textarea) return;
@@ -401,6 +441,7 @@ export function disposeTerminal(sessionId: string) {
   }
   const entry = registry.get(sessionId);
   if (!entry) return;
+  entry.copyDetach?.();
   entry.imeDetach?.();
   registry.delete(sessionId);
   for (const d of entry.osc) {
