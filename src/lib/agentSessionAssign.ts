@@ -11,13 +11,21 @@ export type SessionClaim = {
   paneId: string;
   currentId: string | null | undefined;
   lastUserWrite: number;
+  lastOutput: number;
 };
 
 export type SessionAssignment = {
   projectId: string;
   paneId: string;
-  sessionId: string;
+  sessionId: string | null;
 };
+
+export type PaneActivity = {
+  lastUserWrite: number;
+  lastOutput: number;
+};
+
+export type AssignMode = "capture" | "resume";
 
 function sessionPoolKey(command: string, cwd: string) {
   return `${agentBin(command)}\0${normalizeFsPath(cwd).toLowerCase()}`;
@@ -34,17 +42,45 @@ function uniqueById(discovered: DiscoveredSession[]): DiscoveredSession[] {
   return [...byId.values()].sort((a, b) => b.updatedMs - a.updatedMs || a.id.localeCompare(b.id));
 }
 
-export type AssignMode = "capture" | "resume";
+function activity(claim: SessionClaim) {
+  return Math.max(claim.lastUserWrite, claim.lastOutput);
+}
+
+function pickMostActive(claims: SessionClaim[]): SessionClaim {
+  return claims.reduce((best, claim) => (activity(claim) > activity(best) ? claim : best));
+}
+
+function diffsFromAssigned(claims: SessionClaim[], assigned: Map<string, string | null>): SessionAssignment[] {
+  const next: SessionAssignment[] = [];
+  for (const claim of claims) {
+    if (!assigned.has(claim.paneId)) continue;
+    const sessionId = assigned.get(claim.paneId) ?? null;
+    if (sessionId === (claim.currentId ?? null)) continue;
+    next.push({ projectId: claim.projectId, paneId: claim.paneId, sessionId });
+  }
+  return next;
+}
+
+/** Later panes that stored the same chat id as an earlier pane are cleared so they start fresh. */
+function dedupeClaims(claims: SessionClaim[]): SessionAssignment[] {
+  const used = new Set<string>();
+  const assigned = new Map<string, string | null>();
+  for (const claim of claims) {
+    const current = claim.currentId?.trim();
+    if (!current) continue;
+    if (used.has(current)) assigned.set(claim.paneId, null);
+    else used.add(current);
+  }
+  return diffsFromAssigned(claims, assigned);
+}
 
 /**
- * Map discovered agent chats onto panes of the same command+cwd without collisions.
+ * Bind discovered chats to panes by identity, not by recency order.
  *
- * Existing claims that still exist are kept. A second pane that stored the same
- * id is given a leftover chat so two identical agents never resume one session.
- * In capture mode, unclaimed panes are filled oldest-first (first pane matches
- * the first spawned chat), and a newer leftover chat goes to the pane typed in last.
- * Resume mode only splits duplicate stored ids — empty panes stay empty so a
- * newly added Agent starts a fresh chat.
+ * Capture keeps each pane's stored id. A new unclaimed chat is given to the pane
+ * that was actually active (PTY input/output), never to "the first pane" just
+ * because its file is older. Resume only clears duplicate stored ids so two
+ * panes are not launched with the same --resume target.
  */
 export function assignAgentSessions(
   claims: SessionClaim[],
@@ -52,67 +88,58 @@ export function assignAgentSessions(
   mode: AssignMode = "capture",
 ): SessionAssignment[] {
   if (claims.length === 0) return [];
+  if (mode === "resume") return dedupeClaims(claims);
+
   const sessions = uniqueById(discovered);
   const byId = new Map(sessions.map((session) => [session.id, session]));
-  const assigned = new Map<string, string>();
+  const assigned = new Map<string, string | null>();
   const used = new Set<string>();
 
   for (const claim of claims) {
     const current = claim.currentId?.trim();
-    if (!current || !byId.has(current) || used.has(current)) continue;
+    if (!current || used.has(current)) continue;
     assigned.set(claim.paneId, current);
     used.add(current);
   }
 
-  const hungry = claims.filter((claim) => {
-    if (assigned.has(claim.paneId)) return false;
-    if (mode === "resume") {
-      const current = claim.currentId?.trim();
-      return Boolean(current && used.has(current));
+  for (const session of sessions) {
+    if (used.has(session.id)) continue;
+
+    const hungry = claims.filter((claim) => !assigned.has(claim.paneId));
+    let pick: SessionClaim | undefined;
+
+    if (hungry.length === 1) {
+      pick = hungry[0];
+    } else if (hungry.length > 1) {
+      const active = hungry.filter((claim) => activity(claim) > 0);
+      if (active.length === 0) continue;
+      pick = pickMostActive(active);
+    } else {
+      const active = claims.filter((claim) => activity(claim) > 0);
+      if (active.length === 0) continue;
+      const best = pickMostActive(active);
+      const previous = assigned.get(best.paneId);
+      if (previous) {
+        const previousMeta = byId.get(previous);
+        if (previousMeta && previousMeta.updatedMs >= session.updatedMs) continue;
+      }
+      pick = best;
     }
-    return true;
-  });
-  const unusedOldestFirst = [...sessions].reverse().filter((session) => !used.has(session.id));
-  for (const session of unusedOldestFirst) {
-    const claim = hungry.shift();
-    if (!claim) break;
-    assigned.set(claim.paneId, session.id);
+
+    if (!pick) continue;
+    const previous = assigned.get(pick.paneId);
+    if (previous) used.delete(previous);
+    assigned.set(pick.paneId, session.id);
     used.add(session.id);
   }
 
-  if (mode === "capture") {
-    for (const session of sessions) {
-      if (used.has(session.id)) continue;
-      let best: SessionClaim | null = null;
-      for (const claim of claims) {
-        const current = assigned.get(claim.paneId);
-        if (!current) continue;
-        const currentMeta = byId.get(current);
-        if (!currentMeta || currentMeta.updatedMs >= session.updatedMs) continue;
-        if (claim.lastUserWrite <= 0) continue;
-        if (!best || claim.lastUserWrite > best.lastUserWrite) best = claim;
-      }
-      if (!best) continue;
-      const previous = assigned.get(best.paneId);
-      if (previous) used.delete(previous);
-      assigned.set(best.paneId, session.id);
-      used.add(session.id);
-    }
-  }
-
-  const next: SessionAssignment[] = [];
-  for (const claim of claims) {
-    const sessionId = assigned.get(claim.paneId);
-    if (!sessionId || sessionId === (claim.currentId ?? "")) continue;
-    next.push({ projectId: claim.projectId, paneId: claim.paneId, sessionId });
-  }
-  return next;
+  return diffsFromAssigned(claims, assigned);
 }
 
 export async function planCapturedSessions(
   targets: LiveAgentTarget[],
   discover: (command: string, cwd: string) => Promise<DiscoveredSession[]>,
-  lastUserWrite: (projectId: string, paneId: string) => number,
+  paneActivity: (projectId: string, paneId: string) => PaneActivity,
   mode: AssignMode = "capture",
 ): Promise<SessionAssignment[]> {
   const groups = new Map<string, LiveAgentTarget[]>();
@@ -127,19 +154,27 @@ export async function planCapturedSessions(
   for (const group of groups.values()) {
     const first = group[0];
     if (!first) continue;
+    const claims: SessionClaim[] = group.map((target) => {
+      const activity = paneActivity(target.projectId, target.paneId);
+      return {
+        projectId: target.projectId,
+        paneId: target.paneId,
+        currentId: target.currentSessionId,
+        lastUserWrite: activity.lastUserWrite,
+        lastOutput: activity.lastOutput,
+      };
+    });
+    if (mode === "resume") {
+      assignments.push(...assignAgentSessions(claims, [], "resume"));
+      continue;
+    }
     let discovered: DiscoveredSession[] = [];
     try {
       discovered = await discover(first.command, first.cwd);
     } catch {
       continue;
     }
-    const claims: SessionClaim[] = group.map((target) => ({
-      projectId: target.projectId,
-      paneId: target.paneId,
-      currentId: target.currentSessionId,
-      lastUserWrite: lastUserWrite(target.projectId, target.paneId),
-    }));
-    assignments.push(...assignAgentSessions(claims, discovered, mode));
+    assignments.push(...assignAgentSessions(claims, discovered, "capture"));
   }
   return assignments;
 }

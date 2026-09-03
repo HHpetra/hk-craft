@@ -122,15 +122,16 @@ function patchProject(config: AppConfig, projectId: string, patch: Partial<Proje
   };
 }
 
-function paneLastUserWrite(projectId: string, paneId: string) {
-  return getPtyActivity(sessionId(projectId, "agent", paneId)).lastUserWrite;
+function paneActivity(projectId: string, paneId: string) {
+  const track = getPtyActivity(sessionId(projectId, "agent", paneId));
+  return { lastUserWrite: track.lastUserWrite, lastOutput: track.lastOutput };
 }
 
 function applySessionAssignments(config: AppConfig, assignments: SessionAssignment[]): AppConfig | null {
   if (assignments.length === 0) return null;
-  const byProject = new Map<string, Map<string, string>>();
+  const byProject = new Map<string, Map<string, string | null>>();
   for (const assignment of assignments) {
-    const panes = byProject.get(assignment.projectId) ?? new Map<string, string>();
+    const panes = byProject.get(assignment.projectId) ?? new Map<string, string | null>();
     panes.set(assignment.paneId, assignment.sessionId);
     byProject.set(assignment.projectId, panes);
   }
@@ -140,8 +141,9 @@ function applySessionAssignments(config: AppConfig, assignments: SessionAssignme
     if (!paneUpdates) return project;
     let projectChanged = false;
     const panes = project.panes.map((pane) => {
-      const nextId = paneUpdates.get(pane.id);
-      if (!nextId || pane.agent_session_id === nextId) return pane;
+      if (!paneUpdates.has(pane.id)) return pane;
+      const nextId = paneUpdates.get(pane.id) ?? null;
+      if ((pane.agent_session_id ?? null) === nextId) return pane;
       projectChanged = true;
       changed = true;
       return { ...pane, agent_session_id: nextId };
@@ -644,7 +646,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
       const assignments = await planCapturedSessions(
         agentTargets(project, config.agent_presets),
         discoverAgentSessions,
-        () => 0,
+        () => ({ lastUserWrite: 0, lastOutput: 0 }),
         "resume",
       );
       const latest = get().config;
@@ -712,7 +714,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
       get().sessionStatus,
       config.agent_presets,
     );
-    const assignments = await planCapturedSessions(targets, discoverAgentSessions, paneLastUserWrite);
+    const assignments = await planCapturedSessions(targets, discoverAgentSessions, paneActivity);
     const latest = get().config;
     if (!latest) return;
     const next = applySessionAssignments(latest, assignments);

@@ -12,6 +12,7 @@ function claim(partial: Partial<SessionClaim> & Pick<SessionClaim, "paneId">): S
     projectId: "proj",
     currentId: null,
     lastUserWrite: 0,
+    lastOutput: 0,
     ...partial,
   };
 }
@@ -21,9 +22,18 @@ function sessions(...rows: Array<[string, number]>): DiscoveredSession[] {
 }
 
 describe("assignAgentSessions", () => {
-  it("gives each pane a distinct chat, oldest first, when none are claimed yet", () => {
+  it("does not pair idle panes to chats by file recency", () => {
+    expect(
+      assignAgentSessions(
+        [claim({ paneId: "a1" }), claim({ paneId: "a2" })],
+        sessions(["b", 20], ["a", 10]),
+      ),
+    ).toEqual([]);
+  });
+
+  it("gives the newest unclaimed chat to the pane that was actually active", () => {
     const next = assignAgentSessions(
-      [claim({ paneId: "a1" }), claim({ paneId: "a2" })],
+      [claim({ paneId: "a1", lastOutput: 10 }), claim({ paneId: "a2", lastOutput: 90 })],
       sessions(["b", 20], ["a", 10]),
     );
     expect(next).toEqual([
@@ -32,7 +42,7 @@ describe("assignAgentSessions", () => {
     ]);
   });
 
-  it("keeps existing claims and fills the other pane from the leftover chats", () => {
+  it("assigns a single unclaimed chat to the only empty pane", () => {
     const next = assignAgentSessions(
       [claim({ paneId: "a1", currentId: "a" }), claim({ paneId: "a2" })],
       sessions(["b", 20], ["a", 10]),
@@ -40,20 +50,30 @@ describe("assignAgentSessions", () => {
     expect(next).toEqual([{ projectId: "proj", paneId: "a2", sessionId: "b" }]);
   });
 
-  it("does not assign the same chat to two panes that already share it", () => {
-    const next = assignAgentSessions(
-      [claim({ paneId: "a1", currentId: "b" }), claim({ paneId: "a2", currentId: "b" })],
-      sessions(["b", 20], ["a", 10]),
-    );
-    expect(next).toEqual([{ projectId: "proj", paneId: "a2", sessionId: "a" }]);
+  it("keeps each pane's stored chat even when a leftover newer file exists", () => {
+    expect(
+      assignAgentSessions(
+        [claim({ paneId: "a1", currentId: "a" }), claim({ paneId: "a2", currentId: "b" })],
+        sessions(["c", 30], ["b", 20], ["a", 10]),
+      ),
+    ).toEqual([]);
   });
 
-  it("leaves a second pane unassigned when only one chat exists", () => {
+  it("keeps a stored chat that discovery no longer lists", () => {
+    expect(
+      assignAgentSessions(
+        [claim({ paneId: "a1", currentId: "a" }), claim({ paneId: "a2", currentId: "b" })],
+        sessions(["c", 1]),
+      ),
+    ).toEqual([]);
+  });
+
+  it("gives the only discovered chat to the more active empty pane", () => {
     const next = assignAgentSessions(
-      [claim({ paneId: "a1" }), claim({ paneId: "a2" })],
+      [claim({ paneId: "a1", lastOutput: 10 }), claim({ paneId: "a2", lastOutput: 90 })],
       sessions(["only", 1]),
     );
-    expect(next).toEqual([{ projectId: "proj", paneId: "a1", sessionId: "only" }]);
+    expect(next).toEqual([{ projectId: "proj", paneId: "a2", sessionId: "only" }]);
   });
 
   it("moves a newer unclaimed chat onto the pane that was typed in last", () => {
@@ -67,42 +87,29 @@ describe("assignAgentSessions", () => {
     expect(next).toEqual([{ projectId: "proj", paneId: "a1", sessionId: "c" }]);
   });
 
-  it("does not steal a newer leftover chat when no pane has been typed in", () => {
-    const next = assignAgentSessions(
-      [claim({ paneId: "a1", currentId: "a" }), claim({ paneId: "a2", currentId: "b" })],
-      sessions(["c", 30], ["b", 20], ["a", 10]),
-    );
-    expect(next).toEqual([]);
-  });
-
-  it("in resume mode splits a duplicated stored id but does not fill a fresh pane", () => {
+  it("in resume mode clears a duplicated stored id instead of filling by recency", () => {
     const split = assignAgentSessions(
       [claim({ paneId: "a1", currentId: "b" }), claim({ paneId: "a2", currentId: "b" })],
       sessions(["b", 20], ["a", 10]),
       "resume",
     );
-    expect(split).toEqual([{ projectId: "proj", paneId: "a2", sessionId: "a" }]);
+    expect(split).toEqual([{ projectId: "proj", paneId: "a2", sessionId: null }]);
 
-    const fresh = assignAgentSessions(
-      [claim({ paneId: "a1", currentId: "a" }), claim({ paneId: "a2" })],
-      sessions(["b", 20], ["a", 10]),
-      "resume",
-    );
-    expect(fresh).toEqual([]);
+    expect(
+      assignAgentSessions(
+        [claim({ paneId: "a1", currentId: "a" }), claim({ paneId: "a2" })],
+        sessions(["b", 20], ["a", 10]),
+        "resume",
+      ),
+    ).toEqual([]);
 
-    const unique = assignAgentSessions(
-      [claim({ paneId: "a1", currentId: "a" }), claim({ paneId: "a2", currentId: "b" })],
-      sessions(["c", 30], ["b", 20], ["a", 10]),
-      "resume",
-    );
-    expect(unique).toEqual([]);
-
-    const unknownStored = assignAgentSessions(
-      [claim({ paneId: "a1", currentId: "a" }), claim({ paneId: "a2", currentId: "b" })],
-      sessions(["c", 1]),
-      "resume",
-    );
-    expect(unknownStored).toEqual([]);
+    expect(
+      assignAgentSessions(
+        [claim({ paneId: "a1", currentId: "a" }), claim({ paneId: "a2", currentId: "b" })],
+        sessions(["c", 30], ["b", 20], ["a", 10]),
+        "resume",
+      ),
+    ).toEqual([]);
   });
 });
 
@@ -139,7 +146,10 @@ describe("planCapturedSessions", () => {
         if (command === "cursor-agent") return sessions(["chat-b", 2], ["chat-a", 1]);
         return sessions(["codex-1", 1]);
       },
-      () => 0,
+      (_projectId, paneId) => ({
+        lastUserWrite: 0,
+        lastOutput: paneId === "c2" ? 90 : paneId === "c1" ? 10 : 0,
+      }),
     );
     expect(calls.sort()).toEqual(["codex", "cursor-agent"]);
     expect(next).toEqual([
