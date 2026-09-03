@@ -209,6 +209,13 @@ function isPasteShortcut(event: KeyboardEvent) {
   return event.code === "KeyV" && (event.ctrlKey || event.metaKey);
 }
 
+/** Ctrl/Shift+Enter should insert LF. xterm maps every Enter to CR. */
+function isNewlineShortcut(event: KeyboardEvent) {
+  if (event.altKey || event.metaKey) return false;
+  if (event.key !== "Enter") return false;
+  return event.ctrlKey || event.shiftKey;
+}
+
 async function readClipboardText() {
   try {
     const text = await navigator.clipboard.readText();
@@ -226,12 +233,22 @@ async function readClipboardText() {
 function bindTerminalInput(entry: RegistryEntry) {
   const { term } = entry;
   term.attachCustomKeyEventHandler((event) => {
-    if (!isPasteShortcut(event)) return true;
-    event.preventDefault();
-    void readClipboardText().then((text) => {
-      if (text) term.paste(text);
-    });
-    return false;
+    if (isPasteShortcut(event)) {
+      event.preventDefault();
+      void readClipboardText().then((text) => {
+        if (text) term.paste(text);
+      });
+      return false;
+    }
+    if (isNewlineShortcut(event)) {
+      if (entry.composing) return true;
+      if (event.type === "keydown") {
+        event.preventDefault();
+        term.input("\n");
+      }
+      return false;
+    }
+    return true;
   });
 
   const textarea = term.textarea;

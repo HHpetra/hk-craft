@@ -70,7 +70,8 @@
 ```text
 .
 ├── ai-docs/                    # 需求与设计文档
-│   └── agent-workbench-design.md
+│   ├── agent-workbench-design.md
+│   └── release-process.md      # 版本发布与 GitHub Release 流程
 ├── AGENTS.md                   # Agent 指南与规范 (本文件)
 ├── public/                     # Vite 静态资源（打包时复制到 dist/）
 │   └── favicon.svg
@@ -116,7 +117,8 @@
 | **前端检查** | `pnpm lint` / `pnpm type-check` | TypeScript 类型检查与 ESLint |
 | **Rust 检查** | `cargo check` / `cargo clippy` | Rust 静态分析与规范检查 |
 | **单元测试** | `cargo test` / `pnpm test` | 后端与前端逻辑测试 |
-| **生产打包** | `pnpm build` | 构建可分发的安装包/二进制 |
+| **生产打包** | `pnpm build` / `pnpm tauri build` | 构建可分发的安装包/二进制 |
+| **发布新版本** | 见 [ai-docs/release-process.md](ai-docs/release-process.md) | 升版本、打包、打标签并发布 GitHub Release |
 
 ---
 
