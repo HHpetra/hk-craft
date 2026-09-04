@@ -18,6 +18,30 @@ export function fsOpen(path: string) {
   return invoke<void>("fs_open", { path });
 }
 
+export function fsReveal(path: string) {
+  return invoke<void>("fs_reveal", { path });
+}
+
+export function fsCopy(src: string, dest: string) {
+  return invoke<string>("fs_copy", { src, dest });
+}
+
+export function fsMove(src: string, dest: string) {
+  return invoke<string>("fs_move", { src, dest });
+}
+
+export function fsRename(path: string, newName: string) {
+  return invoke<string>("fs_rename", { path, newName });
+}
+
+export function fsDelete(path: string) {
+  return invoke<void>("fs_delete", { path });
+}
+
+export function fsCreate(dir: string, name: string, isDir: boolean) {
+  return invoke<string>("fs_create", { dir, name, isDir });
+}
+
 export function openUrl(url: string) {
   return invoke<void>("open_url", { url });
 }
