@@ -1,6 +1,8 @@
 import type { AgentPreset, Project, SessionStatus, SpawnOpts, WorkspacePane } from "../types";
-import { resolveAgentCommand, resolvePresetCommand, resumeArgsForSession } from "./agentProtocol";
+import { DEFAULT_DOCKER_SHELLS, type DockerLaunchInput } from "./dockerLaunch";
 import { paneSessionId } from "./panes";
+import { commandPayload } from "./quickCommands";
+import { resolveAgentCommand, resolvePresetCommand, resumeArgsForSession } from "./agentProtocol";
 
 export type LaunchMode = "ensure" | "restart";
 
@@ -13,20 +15,33 @@ export type AgentPaneRef = {
   paneId: string;
 };
 
-export type PaneLaunchPlan = {
-  sessionId: string;
-  action: "skip" | "spawn";
-  killFirst: boolean;
-  spawn: SpawnOpts | null;
-  fallbackSpawn: SpawnOpts | null;
-  /** Persist `agent_seen` only after the primary spawn succeeds — not after resume fallback. */
-  markAgentSeen: boolean;
-  clearSessionOnFallback: boolean;
-  failNoticePrefix: "Agent" | "Runner";
-};
+export type PaneLaunchPlan =
+  | { action: "skip"; sessionId: string }
+  | { action: "spawn"; kind: "runner"; sessionId: string; killFirst: boolean; spawn: SpawnOpts }
+  | {
+      action: "spawn";
+      kind: "agent";
+      sessionId: string;
+      killFirst: boolean;
+      spawn: SpawnOpts;
+      resumeFallback: SpawnOpts | null;
+      markAgentSeen: boolean;
+    }
+  | { action: "spawn"; kind: "docker"; sessionId: string; killFirst: boolean; input: DockerLaunchInput };
 
 function isLive(status: SessionStatus | undefined) {
   return status === "running" || status === "waiting";
+}
+
+function skipPlan(sessionId: string): PaneLaunchPlan {
+  return { action: "skip", sessionId };
+}
+
+function dockerPostWrite(pane: Extract<WorkspacePane, { kind: "docker" }>): string | null {
+  if (!pane.docker_auto_exec) return null;
+  const body = pane.docker_exec_command ?? "";
+  if (!body.trim()) return null;
+  return commandPayload(body);
 }
 
 export function planPaneLaunch(input: {
@@ -41,18 +56,8 @@ export function planPaneLaunch(input: {
   const sessionId = paneSessionId(input.project.id, input.pane);
   if (!sessionId) return null;
 
-  const failNoticePrefix = input.pane.kind === "runner" ? "Runner" : "Agent";
   if (input.mode === "ensure" && isLive(input.status)) {
-    return {
-      sessionId,
-      action: "skip",
-      killFirst: false,
-      spawn: null,
-      fallbackSpawn: null,
-      markAgentSeen: false,
-      clearSessionOnFallback: false,
-      failNoticePrefix,
-    };
+    return skipPlan(sessionId);
   }
 
   const cwd = input.project.path;
@@ -60,32 +65,47 @@ export function planPaneLaunch(input: {
 
   if (input.pane.kind === "runner") {
     return {
-      sessionId,
       action: "spawn",
+      kind: "runner",
+      sessionId,
       killFirst,
       spawn: { sessionId, cwd, command: "" },
-      fallbackSpawn: null,
-      markAgentSeen: false,
-      clearSessionOnFallback: false,
-      failNoticePrefix: "Runner",
     };
   }
+
+  if (input.pane.kind === "docker") {
+    return {
+      action: "spawn",
+      kind: "docker",
+      sessionId,
+      killFirst,
+      input: {
+        sessionId,
+        cwd,
+        container: input.pane.docker_container?.trim() ?? "",
+        shells: [...DEFAULT_DOCKER_SHELLS],
+        postWrite: dockerPostWrite(input.pane),
+        killFirst,
+      },
+    };
+  }
+
+  if (input.pane.kind !== "agent") return null;
 
   const command = resolveAgentCommand(input.pane, input.project, input.presets);
   const resume = input.resumeOnStart ? resumeArgsForSession(command, input.pane.agent_session_id) : [];
   const spawn: SpawnOpts = { sessionId, cwd, command, args: resume };
-  const fallbackSpawn: SpawnOpts | null =
+  const resumeFallback: SpawnOpts | null =
     resume.length > 0 ? { sessionId, cwd, command, args: [] } : null;
 
   return {
-    sessionId,
     action: "spawn",
+    kind: "agent",
+    sessionId,
     killFirst,
     spawn,
-    fallbackSpawn,
+    resumeFallback,
     markAgentSeen: input.mode === "ensure" && !input.agentSeen,
-    clearSessionOnFallback: Boolean(fallbackSpawn),
-    failNoticePrefix: "Agent",
   };
 }
 

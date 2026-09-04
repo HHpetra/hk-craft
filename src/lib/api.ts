@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { notePtyUserInput } from "./ptyActivity";
-import type { AppConfig, FileEntry, SpawnOpts, SpawnResult } from "../types";
+import type { AppConfig, DockerContainer, FileEntry, SpawnOpts, SpawnResult } from "../types";
 
 export function loadConfig() {
   return invoke<AppConfig>("load_config");
@@ -78,4 +78,12 @@ export function discoverAgentSessions(command: string, cwd: string) {
     command,
     cwd,
   }).then((rows) => rows.map((row) => ({ id: row.id, updatedMs: row.updated_ms })));
+}
+
+export function dockerListContainers() {
+  return invoke<DockerContainer[]>("docker_list_containers");
+}
+
+export function dockerEnsureRunning(name: string) {
+  return invoke<void>("docker_ensure_running", { name });
 }

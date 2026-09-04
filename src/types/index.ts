@@ -1,8 +1,8 @@
 export type WorkspaceLayout = "tabs" | "row" | "grid";
 
-export type PaneKind = "explorer" | "agent" | "runner";
+export type PaneKind = "explorer" | "agent" | "runner" | "docker";
 
-export type SessionKind = "agent" | "runner";
+export type SessionKind = "agent" | "runner" | "docker";
 
 export type SessionStatus = "idle" | "running" | "waiting" | "exited" | "error";
 
@@ -19,6 +19,7 @@ export interface Settings {
   terminal_font: string;
   last_agent_size?: [number, number];
   last_runner_size?: [number, number];
+  last_docker_size?: [number, number];
 }
 
 export interface AgentPreset {
@@ -33,11 +34,28 @@ export interface Bookmark {
   path: string;
 }
 
-export interface WorkspacePane {
+export type WorkspacePane =
+  | { id: string; kind: "explorer" }
+  | { id: string; kind: "agent"; preset_id?: string | null; agent_session_id?: string | null }
+  | { id: string; kind: "runner" }
+  | {
+      id: string;
+      kind: "docker";
+      docker_container?: string | null;
+      docker_auto_exec?: boolean;
+      docker_exec_command?: string;
+    };
+
+export type DockerPane = Extract<WorkspacePane, { kind: "docker" }>;
+export type AgentPane = Extract<WorkspacePane, { kind: "agent" }>;
+
+export interface DockerContainer {
   id: string;
-  kind: PaneKind;
-  preset_id?: string | null;
-  agent_session_id?: string | null;
+  name: string;
+  image: string;
+  state: string;
+  status: string;
+  running: boolean;
 }
 
 export interface QuickCommand {

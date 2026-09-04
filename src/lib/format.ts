@@ -1,3 +1,8 @@
+import type { SessionKind } from "../types";
+import { isSessionKind } from "./paneCaps";
+
+export { isSessionKind } from "./paneCaps";
+
 export function cn(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
 }
@@ -30,18 +35,18 @@ export function formatTime(epochSeconds: number) {
 
 export type ParsedSessionId = {
   projectId: string;
-  kind: "agent" | "runner";
+  kind: SessionKind;
   paneId: string;
 };
 
-export function sessionId(projectId: string, kind: "agent" | "runner", paneId: string) {
+export function sessionId(projectId: string, kind: SessionKind, paneId: string) {
   return `${projectId}:${kind}:${paneId}`;
 }
 
 export function parseSessionId(id: string): ParsedSessionId | null {
   const [projectId, kind, ...rest] = id.split(":");
   const paneId = rest.join(":");
-  if (!projectId || !paneId || (kind !== "agent" && kind !== "runner")) return null;
+  if (!projectId || !paneId || !isSessionKind(kind)) return null;
   return { projectId, kind, paneId };
 }
 

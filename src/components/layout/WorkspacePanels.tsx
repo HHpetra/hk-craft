@@ -1,12 +1,13 @@
 import type { DragEvent, ReactNode } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import { FileExplorer } from "../explorer/FileExplorer";
-import { RunnerQuickBar } from "../terminal/RunnerQuickBar";
+import { QuickCommandBar } from "../terminal/QuickCommandBar";
 import { TerminalPane } from "../terminal/TerminalPane";
 import { cn, sessionId } from "../../lib/format";
+import { paneCaps } from "../../lib/paneCaps";
 import { commitPathDrop, noteDropHover, usePathDrag } from "../../lib/dnd";
 import { useActiveProject, useWorkspace } from "../../store/workspace";
-import type { Project, WorkspacePane } from "../../types";
+import type { Project, SessionKind, WorkspacePane } from "../../types";
 
 function gridRows(panes: WorkspacePane[]): Array<Array<WorkspacePane | null>> {
   const n = panes.length;
@@ -23,10 +24,11 @@ function TerminalHost({
   interactive,
 }: {
   sessionId: string;
-  kind: "agent" | "runner";
+  kind: SessionKind;
   interactive: boolean;
 }) {
   const dragging = Boolean(usePathDrag()?.length);
+  const caps = paneCaps(kind);
 
   function onDragOver(event: DragEvent) {
     event.preventDefault();
@@ -41,21 +43,23 @@ function TerminalHost({
   }
 
   return (
-    <div data-drop-session={sid} className="flex h-full w-full flex-col bg-surface-term">
+    <div data-drop-session={caps.acceptsPathDrop ? sid : undefined} className="flex h-full w-full flex-col bg-surface-term">
       <div className="relative min-h-0 flex-1">
         <TerminalPane sessionId={sid} kind={kind} interactive={interactive} />
-        <div
-          className={cn(
-            "absolute inset-0 z-30 rounded-sm border-2",
-            dragging && interactive
-              ? "pointer-events-auto border-sky-400/70 bg-sky-400/10"
-              : "pointer-events-none border-transparent",
-          )}
-          onDragOver={onDragOver}
-          onDrop={onDrop}
-        />
+        {caps.acceptsPathDrop && (
+          <div
+            className={cn(
+              "absolute inset-0 z-30 rounded-sm border-2",
+              dragging && interactive
+                ? "pointer-events-auto border-sky-400/70 bg-sky-400/10"
+                : "pointer-events-none border-transparent",
+            )}
+            onDragOver={onDragOver}
+            onDrop={onDrop}
+          />
+        )}
       </div>
-      {kind === "runner" && <RunnerQuickBar sessionId={sid} />}
+      {caps.quickCommands && <QuickCommandBar sessionId={sid} />}
     </div>
   );
 }

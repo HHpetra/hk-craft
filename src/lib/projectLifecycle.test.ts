@@ -14,6 +14,7 @@ describe("project open / close helpers", () => {
       { id: "e1", kind: "explorer" },
       { id: "a1", kind: "agent" },
       { id: "r1", kind: "runner" },
+      { id: "d1", kind: "docker", docker_container: "web" },
     ];
     const project: Project = {
       id: "p",
@@ -26,7 +27,7 @@ describe("project open / close helpers", () => {
       active_pane_id: "e1",
       panes,
     };
-    expect(projectSessionIds("p", project)).toEqual(["p:agent:a1", "p:runner:r1"]);
+    expect(projectSessionIds("p", project)).toEqual(["p:agent:a1", "p:runner:r1", "p:docker:d1"]);
     expect(projectSessionIds("p", undefined)).toEqual([]);
   });
 });

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ptyWrite } from "./api";
 import { formatAgentInject, formatRunnerInject, parseSessionId } from "./format";
+import { paneCaps } from "./paneCaps";
 import { useWorkspace } from "../store/workspace";
 
 type DragListener = (paths: string[] | null) => void;
@@ -33,14 +34,21 @@ export function peekPathDrag(): string[] | null {
   return current;
 }
 
+function injectableSession(session: string | null | undefined): string | null {
+  if (!session) return null;
+  const parsed = parseSessionId(session);
+  if (!parsed || !paneCaps(parsed.kind).acceptsPathDrop) return null;
+  return session;
+}
+
 export function noteDropHover(session: string | null) {
-  hoverSessionId = session && parseSessionId(session) ? session : null;
+  hoverSessionId = injectableSession(session);
 }
 
 export function sessionAtPoint(x: number, y: number): string | null {
   const el = document.elementFromPoint(x, y);
   const id = el?.closest("[data-drop-session]")?.getAttribute("data-drop-session");
-  return id && parseSessionId(id) ? id : null;
+  return injectableSession(id);
 }
 
 function prefixForSession(session: string) {
@@ -49,7 +57,7 @@ function prefixForSession(session: string) {
   if (!parsed) return "@";
   const project = state.config?.projects.find((p) => p.id === parsed.projectId);
   const pane = project?.panes.find((item) => item.id === parsed.paneId);
-  const presetId = pane?.preset_id ?? project?.agent_preset;
+  const presetId = pane?.kind === "agent" ? (pane.preset_id ?? project?.agent_preset) : project?.agent_preset;
   const preset = state.config?.agent_presets.find((p) => p.id === presetId);
   return preset?.drag_prefix ?? "@";
 }
@@ -70,7 +78,7 @@ export function usePathDrag() {
 
 export function injectDroppedPaths(session: string, paths: string[], prefix?: string) {
   const parsed = parseSessionId(session);
-  if (!parsed || !paths.length) return;
+  if (!parsed || !paneCaps(parsed.kind).acceptsPathDrop || !paths.length) return;
   const key = `${session}:${paths.join("\0")}`;
   const now = Date.now();
   if (key === lastInjectKey && now - lastInjectAt < 400) return;
@@ -93,7 +101,7 @@ export function commitPathDrop(session?: string | null) {
     endPathDrag();
     return;
   }
-  const target = session && parseSessionId(session) ? session : hoverSessionId;
+  const target = injectableSession(session) ?? hoverSessionId;
   if (!target) {
     endPathDrag();
     return;

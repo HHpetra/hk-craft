@@ -37,6 +37,8 @@ pub struct Settings {
     pub last_agent_size: Vec<u16>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub last_runner_size: Vec<u16>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub last_docker_size: Vec<u16>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -54,7 +56,7 @@ pub struct Bookmark {
     pub path: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct WorkspacePane {
     pub id: String,
     pub kind: String,
@@ -62,6 +64,12 @@ pub struct WorkspacePane {
     pub preset_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub docker_container: Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub docker_auto_exec: bool,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub docker_exec_command: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -135,6 +143,7 @@ impl Default for Settings {
             terminal_font: String::new(),
             last_agent_size: Vec::new(),
             last_runner_size: Vec::new(),
+            last_docker_size: Vec::new(),
         }
     }
 }
@@ -179,20 +188,19 @@ fn seed_default_panes(agent_preset: &str, agent_session_id: Option<&str>) -> Vec
         WorkspacePane {
             id: uuid::Uuid::new_v4().to_string(),
             kind: "explorer".into(),
-            preset_id: None,
-            agent_session_id: None,
+            ..WorkspacePane::default()
         },
         WorkspacePane {
             id: uuid::Uuid::new_v4().to_string(),
             kind: "agent".into(),
             preset_id: Some(agent_preset.to_string()),
             agent_session_id: agent_session_id.map(str::to_string),
+            ..WorkspacePane::default()
         },
         WorkspacePane {
             id: uuid::Uuid::new_v4().to_string(),
             kind: "runner".into(),
-            preset_id: None,
-            agent_session_id: None,
+            ..WorkspacePane::default()
         },
     ]
 }
@@ -478,7 +486,7 @@ mod tests {
                     id: "pane-agent".into(),
                     kind: "agent".into(),
                     preset_id: Some("aider".into()),
-                    agent_session_id: None,
+                    ..WorkspacePane::default()
                 }]),
                 ..Project::default()
             }],
@@ -584,5 +592,34 @@ command = "pnpm tauri build"
         let cmds_body = toml::to_string(&with_cmds).expect("serialize commands");
         assert!(cmds_body.contains("quick_commands"));
         assert!(cmds_body.contains("pnpm tauri build"));
+    }
+
+    #[test]
+    fn docker_pane_fields_round_trip() {
+        let parsed: WorkspacePane = toml::from_str(
+            r#"
+id = "d1"
+kind = "docker"
+docker_container = "web"
+docker_auto_exec = true
+docker_exec_command = "cd /workspace"
+"#,
+        )
+        .expect("parse docker pane");
+        assert_eq!(parsed.kind, "docker");
+        assert_eq!(parsed.docker_container.as_deref(), Some("web"));
+        assert!(parsed.docker_auto_exec);
+        assert_eq!(parsed.docker_exec_command, "cd /workspace");
+
+        let quiet = WorkspacePane {
+            id: "d2".into(),
+            kind: "docker".into(),
+            docker_container: Some("db".into()),
+            ..WorkspacePane::default()
+        };
+        let body = toml::to_string(&quiet).expect("serialize docker pane");
+        assert!(body.contains("docker_container"));
+        assert!(!body.contains("docker_auto_exec"));
+        assert!(!body.contains("docker_exec_command"));
     }
 }

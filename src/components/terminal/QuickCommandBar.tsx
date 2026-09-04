@@ -28,7 +28,7 @@ function runCommand(sessionId: string, command: string) {
   void ptyWrite(sessionId, commandPayload(command)).catch(() => undefined);
 }
 
-export function RunnerQuickBar({ sessionId }: { sessionId: string }) {
+export function QuickCommandBar({ sessionId }: { sessionId: string }) {
   const project = useActiveProject();
   const addQuickCommand = useWorkspace((s) => s.addQuickCommand);
   const updateQuickCommand = useWorkspace((s) => s.updateQuickCommand);

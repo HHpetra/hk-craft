@@ -6,17 +6,21 @@ import type {
   PaneKind,
   Project,
   SessionStatus,
+  Settings,
   SpawnOpts,
   SpawnResult,
   WorkspaceLayout,
+  WorkspacePane,
 } from "../types";
 import { agentTargets, liveAgentTargets } from "../lib/agentProtocol";
 import { planCapturedSessions, type SessionAssignment } from "../lib/agentSessionAssign";
-import { checkDir, deleteRunnerPersist, discoverAgentSessions, loadConfig, ptyKill, ptySpawn, saveConfig } from "../lib/api";
+import { checkDir, deleteRunnerPersist, discoverAgentSessions, dockerEnsureRunning, loadConfig, ptyKill, ptyList, ptySpawn, ptyWrite, saveConfig } from "../lib/api";
+import { dockerLaunchNotice, dockerLaunchStatus, executeDockerLaunch } from "../lib/dockerLaunch";
+import { beginPaneLaunch, cancelPaneLaunch, endPaneLaunch, requestPaneRelaunch, takePendingRelaunch } from "../lib/paneLaunchLock";
 import { pathsEqual, sessionId } from "../lib/format";
 import { getPtyActivity } from "../lib/ptyActivity";
 import { agentPanesToRestart, planPaneLaunch, type AgentRestartReason, type PaneLaunchPlan } from "../lib/paneLaunch";
-import { createPane, neighborPaneId, normalizeLayout, paneSessionId, projectSessionIds, terminalPanes, withDefaultWorkspace } from "../lib/panes";
+import { createDockerPane, createPane, neighborPaneId, normalizeLayout, paneSessionId, projectSessionIds, terminalPanes, withDefaultWorkspace } from "../lib/panes";
 import {
   ensureOpened,
   nextWorkingId,
@@ -26,6 +30,9 @@ import {
   workingProjects,
   type ProjectGroup,
 } from "../lib/projects";
+import { clearPtySession, waitPtyQuiet } from "../lib/ptyWait";
+import { createSerialQueue, resolveQueuedUpdate } from "../lib/serialQueue";
+import { sessionKindLabel } from "../lib/status";
 import { applyDocumentTheme, normalizeTheme } from "../lib/theme";
 import { discoverLocalNerdFonts, setPreferredTerminalFont } from "../lib/terminalFonts";
 import {
@@ -52,7 +59,7 @@ interface WorkspaceState {
   settingsOpen: boolean;
   projectDialogOpen: boolean;
   bootstrap: () => Promise<void>;
-  persist: (next: AppConfig) => Promise<boolean>;
+  persist: (next: AppConfig | ((current: AppConfig) => AppConfig)) => Promise<boolean>;
   setNotice: (notice: string | null) => void;
   setSessionStatus: (id: string, status: SessionStatus) => void;
   setSettingsOpen: (open: boolean) => void;
@@ -66,7 +73,9 @@ interface WorkspaceState {
   closeProject: (id: string) => Promise<void>;
   removeProject: (id: string) => Promise<void>;
   updateProjectPreset: (id: string, agentPreset: string) => Promise<void>;
-  addPane: (kind: PaneKind, presetId?: string) => Promise<void>;
+  addPane: (kind: Exclude<PaneKind, "docker">, presetId?: string) => Promise<void>;
+  addDockerPane: (container: string, autoExec: boolean, command: string) => Promise<void>;
+  updateDockerPane: (paneId: string, container: string, autoExec: boolean, command: string) => Promise<void>;
   closePane: (paneId: string) => Promise<void>;
   reorderPanes: (fromId: string, toIndex: number) => Promise<void>;
   addQuickCommand: (name: string, command: string) => Promise<void>;
@@ -122,6 +131,35 @@ function patchProject(config: AppConfig, projectId: string, patch: Partial<Proje
   };
 }
 
+function patchSettings(config: AppConfig, patch: Partial<Settings>): AppConfig {
+  return { ...config, settings: { ...config.settings, ...patch } };
+}
+
+function mapProject(
+  config: AppConfig,
+  projectId: string,
+  update: (project: Project) => Partial<Project> | null,
+): AppConfig {
+  const current = config.projects.find((project) => project.id === projectId);
+  if (!current) return config;
+  const patch = update(current);
+  return patch ? patchProject(config, projectId, patch) : config;
+}
+
+function moveListed<T extends { id: string }>(items: T[], fromId: string, toIndex: number): T[] | null {
+  const fromIndex = items.findIndex((item) => item.id === fromId);
+  if (fromIndex < 0 || items.length === 0) return null;
+  const clamped = Math.max(0, Math.min(toIndex, items.length - 1));
+  if (fromIndex === clamped) return null;
+  const next = [...items];
+  const [moved] = next.splice(fromIndex, 1);
+  if (!moved) return null;
+  next.splice(clamped, 0, moved);
+  return next;
+}
+
+const enqueuePersist = createSerialQueue();
+
 function paneActivity(projectId: string, paneId: string) {
   const track = getPtyActivity(sessionId(projectId, "agent", paneId));
   return { lastUserWrite: track.lastUserWrite, lastOutput: track.lastOutput };
@@ -141,7 +179,7 @@ function applySessionAssignments(config: AppConfig, assignments: SessionAssignme
     if (!paneUpdates) return project;
     let projectChanged = false;
     const panes = project.panes.map((pane) => {
-      if (!paneUpdates.has(pane.id)) return pane;
+      if (!paneUpdates.has(pane.id) || pane.kind !== "agent") return pane;
       const nextId = paneUpdates.get(pane.id) ?? null;
       if ((pane.agent_session_id ?? null) === nextId) return pane;
       projectChanged = true;
@@ -178,8 +216,70 @@ async function executePaneLaunch(
   projectId: string,
   paneId: string,
 ): Promise<boolean> {
-  if (plan.action === "skip" || !plan.spawn) return false;
+  if (plan.action === "skip") return false;
+  const signal = beginPaneLaunch(plan.sessionId);
+  if (!signal) {
+    requestPaneRelaunch(plan.sessionId);
+    return false;
+  }
+  let ok = false;
+  try {
+    if (plan.kind === "docker") {
+      const { setSessionStatus, setNotice } = get();
+      setSessionStatus(plan.sessionId, "idle");
+      const outcome = await executeDockerLaunch(
+        { ...plan.input, signal },
+        {
+          ensureRunning: dockerEnsureRunning,
+          spawn: spawnPty,
+          write: ptyWrite,
+          clearSession: clearPtySession,
+          waitQuiet: waitPtyQuiet,
+          kill: ptyKill,
+          clearTerminal,
+          sessionExists: async (sessionId) => (await ptyList()).includes(sessionId),
+        },
+      );
+      if (!paneStillOpen(get, projectId, paneId)) {
+        try {
+          await ptyKill(plan.sessionId);
+        } catch {
+          // already gone
+        }
+        setSessionStatus(plan.sessionId, "idle");
+      } else {
+        setSessionStatus(plan.sessionId, dockerLaunchStatus(outcome));
+        const notice = dockerLaunchNotice(outcome);
+        if (notice) setNotice(notice);
+        ok = outcome.ok || (outcome.reason === "inject" && outcome.sessionAlive);
+      }
+    } else {
+      ok = await executeAgentOrRunnerLaunch(get, plan, projectId, paneId);
+    }
+  } finally {
+    endPaneLaunch(plan.sessionId);
+  }
+  if (takePendingRelaunch(plan.sessionId)) {
+    await get().restartPane(projectId, paneId);
+  }
+  return ok;
+}
+
+function paneStillOpen(get: WorkspaceGet, projectId: string, paneId: string) {
+  const project = get().config?.projects.find((item) => item.id === projectId);
+  if (!project || project.stowed) return false;
+  if (!get().openedProjectIds.includes(projectId)) return false;
+  return Boolean(project.panes?.some((pane) => pane.id === paneId));
+}
+
+async function executeAgentOrRunnerLaunch(
+  get: WorkspaceGet,
+  plan: Extract<PaneLaunchPlan, { action: "spawn"; kind: "agent" | "runner" }>,
+  projectId: string,
+  paneId: string,
+): Promise<boolean> {
   const { setSessionStatus, setNotice } = get();
+  const failPrefix = sessionKindLabel(plan.kind);
   if (plan.killFirst) {
     try {
       await ptyKill(plan.sessionId);
@@ -191,21 +291,19 @@ async function executePaneLaunch(
   }
 
   const persistClearSession = () => {
-    if (!plan.clearSessionOnFallback) return;
-    const latest = get().config;
-    if (!latest) return;
-    const current = latest.projects.find((project) => project.id === projectId);
-    if (!current) return;
-    const panes = current.panes.map((item) =>
-      item.id === paneId ? { ...item, agent_session_id: null } : item,
+    if (plan.kind !== "agent" || !plan.resumeFallback) return;
+    void get().persist((latest) =>
+      mapProject(latest, projectId, (current) => ({
+        panes: current.panes.map((item) =>
+          item.id === paneId && item.kind === "agent" ? { ...item, agent_session_id: null } : item,
+        ),
+      })),
     );
-    void get().persist(patchProject(latest, projectId, { panes }));
   };
 
   const persistSeen = () => {
-    if (!plan.markAgentSeen) return;
-    const latest = get().config;
-    if (latest) void get().persist(patchProject(latest, projectId, { agent_seen: true }));
+    if (plan.kind !== "agent" || !plan.markAgentSeen) return;
+    void get().persist((latest) => patchProject(latest, projectId, { agent_seen: true }));
   };
 
   const markRunning = (reused: boolean) => {
@@ -218,22 +316,36 @@ async function executePaneLaunch(
     persistSeen();
     return true;
   } catch (err) {
-    if (plan.fallbackSpawn) {
+    if (plan.kind === "agent" && plan.resumeFallback) {
       try {
-        const result = await spawnPty(plan.fallbackSpawn);
-        markRunning(result.reused);
+        const second = await spawnPty(plan.resumeFallback);
+        markRunning(second.reused);
         persistClearSession();
         return true;
       } catch (retryErr) {
         setSessionStatus(plan.sessionId, "error");
-        setNotice(`${plan.failNoticePrefix} 启动失败：${String(retryErr)}`);
+        setNotice(`${failPrefix} 启动失败：${String(retryErr)}`);
         return false;
       }
     }
     setSessionStatus(plan.sessionId, "error");
-    setNotice(`${plan.failNoticePrefix} 启动失败：${String(err)}`);
+    setNotice(`${failPrefix} 启动失败：${String(err)}`);
     return false;
   }
+}
+
+async function appendPane(get: WorkspaceGet, pane: WorkspacePane) {
+  const { config, activeProjectId } = get();
+  if (!config || !activeProjectId) return;
+  const saved = await get().persist((latest) =>
+    mapProject(latest, activeProjectId, (current) => ({
+      panes: [...(current.panes ?? []), pane],
+      active_pane_id: pane.id,
+    })),
+  );
+  if (!saved) return;
+  const latest = get().config?.projects.find((p) => p.id === activeProjectId);
+  if (latest) await get().spawnForProject(latest);
 }
 
 export const useWorkspace = create<WorkspaceState>((set, get) => ({
@@ -271,14 +383,11 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
       hydrateLastFittedSizes({
         agent: config.settings.last_agent_size,
         runner: config.settings.last_runner_size,
+        docker: config.settings.last_docker_size,
       });
       void discoverLocalNerdFonts().then(() => applyRegisteredTerminalFont());
       if (active !== savedActive) {
-        const latest = get().config ?? config;
-        await get().persist({
-          ...latest,
-          settings: { ...latest.settings, active_project_id: active },
-        });
+        await get().persist((latest) => patchSettings(latest, { active_project_id: active }));
       }
       if (project) {
         await get().spawnForProject(project);
@@ -292,25 +401,29 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     }
   },
 
-  persist: async (next) => {
-    try {
-      const sizes = peekLastFittedSizes();
-      const saved = await saveConfig({
-        ...next,
-        settings: {
-          ...next.settings,
-          ...(sizes.agent ? { last_agent_size: sizes.agent } : {}),
-          ...(sizes.runner ? { last_runner_size: sizes.runner } : {}),
-        },
-      });
-      set({ config: saved });
-      applyDocumentTheme(saved.settings.theme);
-      return true;
-    } catch (err) {
-      set({ notice: String(err) });
-      return false;
-    }
-  },
+  persist: (next) =>
+    enqueuePersist(async () => {
+      const resolved = resolveQueuedUpdate(get().config, next);
+      if (!resolved) return false;
+      try {
+        const sizes = peekLastFittedSizes();
+        const saved = await saveConfig({
+          ...resolved,
+          settings: {
+            ...resolved.settings,
+            ...(sizes.agent ? { last_agent_size: sizes.agent } : {}),
+            ...(sizes.runner ? { last_runner_size: sizes.runner } : {}),
+            ...(sizes.docker ? { last_docker_size: sizes.docker } : {}),
+          },
+        });
+        set({ config: saved });
+        applyDocumentTheme(saved.settings.theme);
+        return true;
+      } catch (err) {
+        set({ notice: String(err) });
+        return false;
+      }
+    }),
 
   selectProject: async (id) => {
     const { config } = get();
@@ -330,10 +443,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
       activeProjectId: id,
       openedProjectIds: ensureOpened(s.openedProjectIds, id),
     }));
-    const saved = await get().persist({
-      ...config,
-      settings: { ...config.settings, active_project_id: id },
-    });
+    const saved = await get().persist((latest) => patchSettings(latest, { active_project_id: id }));
     if (!saved) {
       set({ activeProjectId: prevActive, openedProjectIds: prevOpened });
       return;
@@ -362,12 +472,16 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
       agent_session_id: null,
       stowed: false,
     });
-    const next: AppConfig = {
-      ...config,
-      projects: [...workingProjects(config.projects), project, ...stowedProjects(config.projects)],
-      settings: { ...config.settings, active_project_id: project.id },
-    };
-    const saved = await get().persist(next);
+    const saved = await get().persist((latest) => {
+      if (latest.projects.some((item) => pathsEqual(item.path, path.trim()))) return latest;
+      return patchSettings(
+        {
+          ...latest,
+          projects: [...workingProjects(latest.projects), project, ...stowedProjects(latest.projects)],
+        },
+        { active_project_id: project.id },
+      );
+    });
     if (!saved) return;
     set((s) => ({
       activeProjectId: project.id,
@@ -396,13 +510,23 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     const nextActive = wasActive ? nextWorkingId(projects, fromId) : get().activeProjectId;
     const prevConfig = config;
     const prevActive = get().activeProjectId;
-    const next: AppConfig = {
-      ...config,
-      projects,
-      settings: { ...config.settings, active_project_id: nextActive },
-    };
-    set({ config: next, activeProjectId: nextActive });
-    const saved = await get().persist(next);
+    set((state) => ({
+      config: state.config
+        ? patchSettings(
+            { ...state.config, projects: placeProject(state.config.projects, fromId, dest, toIndex) },
+            { active_project_id: nextActive },
+          )
+        : state.config,
+      activeProjectId: nextActive,
+    }));
+    const saved = await get().persist((latest) => {
+      const placed = placeProject(latest.projects, fromId, dest, toIndex);
+      const activeId =
+        becomingStowed && latest.settings.active_project_id === fromId
+          ? nextWorkingId(placed, fromId)
+          : latest.settings.active_project_id;
+      return patchSettings({ ...latest, projects: placed }, { active_project_id: activeId });
+    });
     if (!saved) {
       set({ config: prevConfig, activeProjectId: prevActive });
       return;
@@ -411,7 +535,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     await get().closeProject(fromId);
     set({ notice: `已收纳「${from.name}」` });
     if (!wasActive || !nextActive) return;
-    const project = projects.find((item) => item.id === nextActive);
+    const project = get().config?.projects.find((item) => item.id === nextActive);
     if (!project) return;
     await openAndSpawn(get, set, project);
   },
@@ -437,6 +561,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   closeProject: async (id) => {
     const project = get().config?.projects.find((p) => p.id === id);
     const sessions = projectSessionIds(id, project);
+    for (const session of sessions) cancelPaneLaunch(session);
     set((s) => {
       const sessionStatus = { ...s.sessionStatus };
       for (const session of sessions) sessionStatus[session] = "idle";
@@ -461,12 +586,11 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     const wasActive = get().activeProjectId === id;
     const projects = config.projects.filter((p) => p.id !== id);
     const nextActive = wasActive ? nextWorkingId(projects) : get().activeProjectId;
-    const next: AppConfig = {
-      ...config,
-      projects,
-      settings: { ...config.settings, active_project_id: nextActive },
-    };
-    const saved = await get().persist(next);
+    const saved = await get().persist((latest) => {
+      const remaining = latest.projects.filter((item) => item.id !== id);
+      const activeId = wasActive ? nextWorkingId(remaining) : latest.settings.active_project_id;
+      return patchSettings({ ...latest, projects: remaining }, { active_project_id: activeId });
+    });
     if (!saved) return;
     await get().closeProject(id);
     try {
@@ -476,7 +600,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     }
     set({ activeProjectId: nextActive });
     if (wasActive && nextActive) {
-      const project = projects.find((p) => p.id === nextActive);
+      const project = get().config?.projects.find((p) => p.id === nextActive);
       if (!project) return;
       await openAndSpawn(get, set, project);
     }
@@ -485,7 +609,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   updateProjectPreset: async (id, agentPreset) => {
     const { config } = get();
     if (!config) return;
-    await get().persist(patchProject(config, id, { agent_preset: agentPreset }));
+    await get().persist((latest) => patchProject(latest, id, { agent_preset: agentPreset }));
   },
 
   addPane: async (kind, presetId) => {
@@ -494,14 +618,34 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     const project = config.projects.find((p) => p.id === activeProjectId);
     if (!project) return;
     const preset = kind === "agent" ? (presetId || project.agent_preset) : undefined;
-    const pane = createPane(kind, preset);
-    const panes = [...(project.panes ?? []), pane];
-    const saved = await get().persist(
-      patchProject(config, activeProjectId, { panes, active_pane_id: pane.id }),
+    await appendPane(get, createPane(kind, preset));
+  },
+
+  addDockerPane: async (container, autoExec, command) => {
+    await appendPane(get, createDockerPane({ container, autoExec, command }));
+  },
+
+  updateDockerPane: async (paneId, container, autoExec, command) => {
+    const { config, activeProjectId } = get();
+    if (!config || !activeProjectId) return;
+    const project = config.projects.find((p) => p.id === activeProjectId);
+    if (!project) return;
+    const saved = await get().persist((latest) =>
+      mapProject(latest, activeProjectId, (current) => ({
+        panes: (current.panes ?? []).map((item) =>
+          item.id === paneId && item.kind === "docker"
+            ? {
+                ...item,
+                docker_container: container.trim(),
+                docker_auto_exec: autoExec,
+                docker_exec_command: command,
+              }
+            : item,
+        ),
+      })),
     );
     if (!saved) return;
-    const latest = get().config?.projects.find((p) => p.id === activeProjectId);
-    if (latest) await get().spawnForProject(latest);
+    await get().restartPane(activeProjectId, paneId);
   },
 
   closePane: async (paneId) => {
@@ -513,6 +657,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     if (!pane) return;
     const session = paneSessionId(activeProjectId, pane);
     if (session) {
+      cancelPaneLaunch(session);
       try {
         await ptyKill(session);
       } catch {
@@ -521,10 +666,14 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
       disposeTerminal(session);
       get().setSessionStatus(session, "idle");
     }
-    const panes = (project.panes ?? []).filter((item) => item.id !== paneId);
-    const active_pane_id =
-      project.active_pane_id === paneId ? neighborPaneId(project.panes ?? [], paneId) : project.active_pane_id;
-    await get().persist(patchProject(config, activeProjectId, { panes, active_pane_id }));
+    await get().persist((latest) =>
+      mapProject(latest, activeProjectId, (current) => {
+        const panes = (current.panes ?? []).filter((item) => item.id !== paneId);
+        const active_pane_id =
+          current.active_pane_id === paneId ? neighborPaneId(current.panes ?? [], paneId) : current.active_pane_id;
+        return { panes, active_pane_id };
+      }),
+    );
   },
 
   reorderPanes: async (fromId, toIndex) => {
@@ -533,24 +682,13 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     const project = config.projects.find((p) => p.id === activeProjectId);
     if (!project) return;
     const prev = project.panes ?? [];
-    const fromIndex = prev.findIndex((pane) => pane.id === fromId);
-    if (fromIndex < 0 || prev.length === 0) return;
-    const clamped = Math.max(0, Math.min(toIndex, prev.length - 1));
-    if (fromIndex === clamped) return;
-    const panes = [...prev];
-    const [moved] = panes.splice(fromIndex, 1);
-    if (!moved) return;
-    panes.splice(clamped, 0, moved);
-    const next = patchProject(config, activeProjectId, { panes });
-    set({ config: next });
-    const saved = await get().persist(next);
-    if (!saved) {
-      set((s) => ({
-        config: s.config
-          ? patchProject(s.config, activeProjectId, { panes: prev })
-          : patchProject(config, activeProjectId, { panes: prev }),
-      }));
-    }
+    if (!moveListed(prev, fromId, toIndex)) return;
+    await get().persist((latest) =>
+      mapProject(latest, activeProjectId, (item) => {
+        const panes = moveListed(item.panes ?? [], fromId, toIndex);
+        return panes ? { panes } : null;
+      }),
+    );
   },
 
   addQuickCommand: async (name, command) => {
@@ -561,11 +699,12 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     const label = name.trim();
     const body = command.trim();
     if (!label || !body) return;
-    const quick_commands = [
-      ...(project.quick_commands ?? []),
-      { id: crypto.randomUUID(), name: label, command: body },
-    ];
-    await get().persist(patchProject(config, activeProjectId, { quick_commands }));
+    const entry = { id: crypto.randomUUID(), name: label, command: body };
+    await get().persist((latest) =>
+      mapProject(latest, activeProjectId, (current) => ({
+        quick_commands: [...(current.quick_commands ?? []), entry],
+      })),
+    );
   },
 
   updateQuickCommand: async (id, name, command) => {
@@ -578,10 +717,13 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     if (!label || !body) return;
     const prev = project.quick_commands ?? [];
     if (!prev.some((item) => item.id === id)) return;
-    const quick_commands = prev.map((item) =>
-      item.id === id ? { ...item, name: label, command: body } : item,
+    await get().persist((latest) =>
+      mapProject(latest, activeProjectId, (current) => ({
+        quick_commands: (current.quick_commands ?? []).map((item) =>
+          item.id === id ? { ...item, name: label, command: body } : item,
+        ),
+      })),
     );
-    await get().persist(patchProject(config, activeProjectId, { quick_commands }));
   },
 
   removeQuickCommand: async (id) => {
@@ -591,8 +733,11 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     if (!project) return;
     const prev = project.quick_commands ?? [];
     if (!prev.some((item) => item.id === id)) return;
-    const quick_commands = prev.filter((item) => item.id !== id);
-    await get().persist(patchProject(config, activeProjectId, { quick_commands }));
+    await get().persist((latest) =>
+      mapProject(latest, activeProjectId, (current) => ({
+        quick_commands: (current.quick_commands ?? []).filter((item) => item.id !== id),
+      })),
+    );
   },
 
   reorderQuickCommands: async (fromId, toIndex) => {
@@ -601,24 +746,13 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     const project = config.projects.find((item) => item.id === activeProjectId);
     if (!project) return;
     const prev = project.quick_commands ?? [];
-    const fromIndex = prev.findIndex((item) => item.id === fromId);
-    if (fromIndex < 0 || prev.length === 0) return;
-    const clamped = Math.max(0, Math.min(toIndex, prev.length - 1));
-    if (fromIndex === clamped) return;
-    const quick_commands = [...prev];
-    const [moved] = quick_commands.splice(fromIndex, 1);
-    if (!moved) return;
-    quick_commands.splice(clamped, 0, moved);
-    const next = patchProject(config, activeProjectId, { quick_commands });
-    set({ config: next });
-    const saved = await get().persist(next);
-    if (!saved) {
-      set((s) => ({
-        config: s.config
-          ? patchProject(s.config, activeProjectId, { quick_commands: prev })
-          : patchProject(config, activeProjectId, { quick_commands: prev }),
-      }));
-    }
+    if (!moveListed(prev, fromId, toIndex)) return;
+    await get().persist((latest) =>
+      mapProject(latest, activeProjectId, (current) => {
+        const quick_commands = moveListed(current.quick_commands ?? [], fromId, toIndex);
+        return quick_commands ? { quick_commands } : null;
+      }),
+    );
   },
 
   setLayout: async (layout) => {
@@ -626,7 +760,11 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     if (!config || !activeProjectId) return;
     const project = config.projects.find((p) => p.id === activeProjectId);
     if (!project || project.layout === layout) return;
-    await get().persist(patchProject(config, activeProjectId, { layout: normalizeLayout(layout) }));
+    await get().persist((latest) =>
+      mapProject(latest, activeProjectId, (current) =>
+        current.layout === layout ? null : { layout: normalizeLayout(layout) },
+      ),
+    );
   },
 
   setActivePane: async (paneId) => {
@@ -635,7 +773,13 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     const project = config.projects.find((p) => p.id === activeProjectId);
     if (!project || project.active_pane_id === paneId) return;
     if (!project.panes.some((pane) => pane.id === paneId)) return;
-    await get().persist(patchProject(config, activeProjectId, { active_pane_id: paneId }));
+    await get().persist((latest) =>
+      mapProject(latest, activeProjectId, (current) => {
+        if (current.active_pane_id === paneId) return null;
+        if (!current.panes.some((pane) => pane.id === paneId)) return null;
+        return { active_pane_id: paneId };
+      }),
+    );
   },
 
   spawnForProject: async (project) => {
@@ -650,14 +794,14 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
         "resume",
       );
       const latest = get().config;
-      if (latest) {
-        const next = applySessionAssignments(latest, assignments);
-        if (next) await get().persist(next);
+      if (latest && assignments.length > 0) {
+        await get().persist((current) => applySessionAssignments(current, assignments) ?? current);
       }
     }
     const current = get().config?.projects.find((item) => item.id === project.id) ?? project;
     const presets = get().config?.agent_presets ?? config.agent_presets;
-    let agentSeen = current.agent_seen;
+    const agentSeen = current.agent_seen;
+    const launches: Promise<boolean>[] = [];
     for (const pane of terminalPanes(current)) {
       const sid = paneSessionId(current.id, pane);
       const plan = planPaneLaunch({
@@ -670,9 +814,9 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
         agentSeen,
       });
       if (!plan || plan.action === "skip") continue;
-      const ok = await executePaneLaunch(get, plan, current.id, pane.id);
-      if (ok && plan.markAgentSeen) agentSeen = true;
+      launches.push(executePaneLaunch(get, plan, current.id, pane.id));
     }
+    await Promise.all(launches);
   },
 
   restartPane: async (projectId, paneId) => {
@@ -701,8 +845,9 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   rememberAgentSession: async (projectId, paneId, chatId) => {
     const { config } = get();
     if (!config) return;
-    const next = applySessionAssignments(config, [{ projectId, paneId, sessionId: chatId }]);
-    if (next) await get().persist(next);
+    await get().persist(
+      (latest) => applySessionAssignments(latest, [{ projectId, paneId, sessionId: chatId }]) ?? latest,
+    );
   },
 
   captureOpenedAgentSessions: async () => {
@@ -717,39 +862,29 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     const assignments = await planCapturedSessions(targets, discoverAgentSessions, paneActivity);
     const latest = get().config;
     if (!latest) return;
-    const next = applySessionAssignments(latest, assignments);
-    if (next) await get().persist(next);
+    await get().persist((current) => applySessionAssignments(current, assignments) ?? current);
   },
 
   snapshotOpenedSessions: async () => {
     await get().captureOpenedAgentSessions();
-    const latest = get().config;
     const activeProjectId = get().activeProjectId;
+    const latest = get().config;
     if (!latest || latest.settings.active_project_id === activeProjectId) return;
-    await get().persist({
-      ...latest,
-      settings: { ...latest.settings, active_project_id: activeProjectId },
-    });
+    await get().persist((current) => patchSettings(current, { active_project_id: activeProjectId }));
   },
 
   setTheme: async (theme) => {
     const { config } = get();
     if (!config) return;
     applyDocumentTheme(theme);
-    await get().persist({
-      ...config,
-      settings: { ...config.settings, theme: normalizeTheme(theme) },
-    });
+    await get().persist((latest) => patchSettings(latest, { theme: normalizeTheme(theme) }));
     restartAgentTargets(get, { kind: "theme" });
   },
 
   setResumeOnStart: async (resume) => {
     const { config } = get();
     if (!config) return;
-    await get().persist({
-      ...config,
-      settings: { ...config.settings, resume_on_start: resume },
-    });
+    await get().persist((latest) => patchSettings(latest, { resume_on_start: resume }));
   },
 
   setTerminalFont: async (family) => {
@@ -757,19 +892,13 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     if (!config) return;
     setPreferredTerminalFont(family);
     applyRegisteredTerminalFont(family);
-    await get().persist({
-      ...config,
-      settings: { ...config.settings, terminal_font: family },
-    });
+    await get().persist((latest) => patchSettings(latest, { terminal_font: family }));
   },
 
   setExplorerView: async (view) => {
     const { config } = get();
     if (!config) return;
-    await get().persist({
-      ...config,
-      settings: { ...config.settings, explorer_view: view },
-    });
+    await get().persist((latest) => patchSettings(latest, { explorer_view: view }));
   },
 }));
 

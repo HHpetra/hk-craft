@@ -1,5 +1,6 @@
 import type { AgentPreset, PaneKind, Project, WorkspaceLayout, WorkspacePane } from "../types";
 import { sessionId } from "./format";
+import { paneCaps } from "./paneCaps";
 
 export function normalizeLayout(value: string | undefined): WorkspaceLayout {
   if (value === "tabs" || value === "row" || value === "grid") return value;
@@ -29,13 +30,17 @@ export function withDefaultWorkspace(project: Omit<Project, "layout" | "active_p
   return { stowed: false, quick_commands: [], ...project, layout, panes, active_pane_id: active };
 }
 
+export function isTerminalPane(pane: WorkspacePane): pane is Exclude<WorkspacePane, { kind: "explorer" }> {
+  return paneCaps(pane.kind).terminal;
+}
+
 export function paneSessionId(projectId: string, pane: WorkspacePane) {
-  if (pane.kind === "explorer") return null;
+  if (!isTerminalPane(pane)) return null;
   return sessionId(projectId, pane.kind, pane.id);
 }
 
 export function terminalPanes(project: Project) {
-  return (project.panes ?? []).filter((pane) => pane.kind === "agent" || pane.kind === "runner");
+  return (project.panes ?? []).filter(isTerminalPane);
 }
 
 export function projectSessionIds(projectId: string, project: Project | undefined | null): string[] {
@@ -46,16 +51,21 @@ export function projectSessionIds(projectId: string, project: Project | undefine
 }
 
 export function paneTitle(pane: WorkspacePane, panes: WorkspacePane[], presets: AgentPreset[]) {
+  const label = paneCaps(pane.kind).label;
   const base =
-    pane.kind === "explorer"
-      ? "资源管理"
-      : pane.kind === "runner"
-        ? "终端"
-        : (presets.find((preset) => preset.id === pane.preset_id)?.name ?? "Agent");
-  const same = panes.filter(
-    (other) =>
-      other.kind === pane.kind && (pane.kind !== "agent" || other.preset_id === pane.preset_id),
-  );
+    pane.kind === "docker"
+      ? (pane.docker_container?.trim() || label)
+      : pane.kind === "agent"
+        ? (presets.find((preset) => preset.id === pane.preset_id)?.name ?? label)
+        : label;
+  const same = panes.filter((other) => {
+    if (other.kind !== pane.kind) return false;
+    if (pane.kind === "agent" && other.kind === "agent") return other.preset_id === pane.preset_id;
+    if (pane.kind === "docker" && other.kind === "docker") {
+      return (other.docker_container ?? "") === (pane.docker_container ?? "");
+    }
+    return true;
+  });
   if (same.length <= 1) return base;
   const index = same.findIndex((other) => other.id === pane.id);
   return index <= 0 ? base : `${base} ${index + 1}`;
@@ -67,9 +77,23 @@ export function neighborPaneId(panes: WorkspacePane[], closedId: string) {
   return panes[index + 1]?.id ?? panes[index - 1]?.id ?? null;
 }
 
-export function createPane(kind: PaneKind, presetId?: string): WorkspacePane {
+export function createPane(kind: Exclude<PaneKind, "docker">, presetId?: string): WorkspacePane {
   if (kind === "agent") {
     return { id: crypto.randomUUID(), kind, preset_id: presetId ?? null };
   }
   return { id: crypto.randomUUID(), kind };
+}
+
+export function createDockerPane(input: {
+  container: string;
+  autoExec: boolean;
+  command: string;
+}): Extract<WorkspacePane, { kind: "docker" }> {
+  return {
+    id: crypto.randomUUID(),
+    kind: "docker",
+    docker_container: input.container.trim(),
+    docker_auto_exec: input.autoExec,
+    docker_exec_command: input.command,
+  };
 }

@@ -6,10 +6,11 @@ import { listen } from "@tauri-apps/api/event";
 import { ptyResize, ptyWrite, clipboardReadText, clipboardWriteText } from "./api";
 import { attachImeAnchor } from "./imeAnchor";
 import { parseSessionId } from "./format";
+import { SESSION_KINDS } from "./paneCaps";
 import { shouldCopySelection } from "./terminalCopy";
 import { hexToOscRgb, normalizeTheme, xtermThemes, type XtermTheme } from "./theme";
 import { primaryTerminalFont, setPreferredTerminalFont, terminalFontFamily } from "./terminalFonts";
-import type { PtyOutput } from "../types";
+import type { PtyExit, PtyOutput, SessionKind } from "../types";
 
 type RegistryEntry = {
   sessionId: string;
@@ -92,12 +93,13 @@ function flushPending(sessionId: string, term: Terminal) {
 }
 
 type FittedSize = { cols: number; rows: number };
-type SessionKindKey = "agent" | "runner";
 
-const lastFittedByKind = new Map<SessionKindKey, FittedSize>();
+const lastFittedByKind = new Map<SessionKind, FittedSize>();
+const outputWatchers = new Set<(sessionId: string, data: string, generation: number) => void>();
+const exitWatchers = new Set<(sessionId: string, generation: number) => void>();
 
-function sessionKind(sessionId: string): SessionKindKey {
-  return parseSessionId(sessionId)?.kind === "runner" ? "runner" : "agent";
+function sessionKind(sessionId: string): SessionKind {
+  return parseSessionId(sessionId)?.kind ?? "agent";
 }
 
 function rememberFittedSize(sessionId: string, cols: number, rows: number) {
@@ -117,23 +119,20 @@ export function lastFittedSize(sessionId: string): FittedSize | null {
   return lastFittedByKind.get(sessionKind(sessionId)) ?? null;
 }
 
-export function hydrateLastFittedSizes(sizes: {
-  agent?: number[] | FittedSize | null;
-  runner?: number[] | FittedSize | null;
-}) {
-  const agent = parseFittedSize(sizes.agent);
-  if (agent) lastFittedByKind.set("agent", agent);
-  const runner = parseFittedSize(sizes.runner);
-  if (runner) lastFittedByKind.set("runner", runner);
+export function hydrateLastFittedSizes(sizes: Partial<Record<SessionKind, number[] | FittedSize | null>>) {
+  for (const kind of SESSION_KINDS) {
+    const parsed = parseFittedSize(sizes[kind]);
+    if (parsed) lastFittedByKind.set(kind, parsed);
+  }
 }
 
-export function peekLastFittedSizes(): { agent?: [number, number]; runner?: [number, number] } {
-  const agent = lastFittedByKind.get("agent");
-  const runner = lastFittedByKind.get("runner");
-  return {
-    ...(agent ? { agent: [agent.cols, agent.rows] as [number, number] } : {}),
-    ...(runner ? { runner: [runner.cols, runner.rows] as [number, number] } : {}),
-  };
+export function peekLastFittedSizes(): Partial<Record<SessionKind, [number, number]>> {
+  const out: Partial<Record<SessionKind, [number, number]>> = {};
+  for (const kind of SESSION_KINDS) {
+    const size = lastFittedByKind.get(kind);
+    if (size) out[kind] = [size.cols, size.rows];
+  }
+  return out;
 }
 
 export function isCurrentGeneration(sessionId: string, generation: number) {
@@ -148,11 +147,36 @@ export function setSessionGeneration(sessionId: string, generation: number) {
   generations.set(sessionId, generation);
 }
 
+export function subscribePtyOutput(
+  listener: (sessionId: string, data: string, generation: number) => void,
+): () => void {
+  outputWatchers.add(listener);
+  return () => {
+    outputWatchers.delete(listener);
+  };
+}
+
+export function subscribePtyExit(listener: (sessionId: string, generation: number) => void): () => void {
+  exitWatchers.add(listener);
+  return () => {
+    exitWatchers.delete(listener);
+  };
+}
+
+function notifyPtyOutput(sessionId: string, data: string, generation: number) {
+  for (const listener of outputWatchers) listener(sessionId, data, generation);
+}
+
+function notifyPtyExit(sessionId: string, generation: number) {
+  for (const listener of exitWatchers) listener(sessionId, generation);
+}
+
 export function ensurePtyOutputListener(): Promise<void> {
   if (outputListenPromise) return outputListenPromise;
   outputListenPromise = listen<PtyOutput>("pty-output", (event) => {
     const { session_id, data, generation } = event.payload;
     if (!isCurrentGeneration(session_id, generation ?? 0)) return;
+    notifyPtyOutput(session_id, data, generation ?? 0);
     const entry = registry.get(session_id);
     if (entry) {
       entry.term.write(data);
@@ -168,8 +192,29 @@ export function ensurePtyOutputListener(): Promise<void> {
   return outputListenPromise;
 }
 
+let exitListenPromise: Promise<void> | null = null;
+
+export function ensurePtyExitListener(): Promise<void> {
+  if (exitListenPromise) return exitListenPromise;
+  exitListenPromise = listen<PtyExit>("pty-exit", (event) => {
+    const { session_id, generation } = event.payload;
+    if (!isCurrentGeneration(session_id, generation ?? 0)) return;
+    notifyPtyExit(session_id, generation ?? 0);
+  })
+    .then(() => undefined)
+    .catch((err) => {
+      exitListenPromise = null;
+      throw err;
+    });
+  return exitListenPromise;
+}
+
+export function ensurePtyListeners() {
+  return Promise.all([ensurePtyOutputListener(), ensurePtyExitListener()]).then(() => undefined);
+}
+
 function buildTerminal(sessionId: string): RegistryEntry {
-  ensurePtyOutputListener();
+  void ensurePtyListeners();
   const theme = xtermThemes[normalizeTheme(document.documentElement.dataset.theme)];
   const term = new Terminal({
     cursorBlink: true,

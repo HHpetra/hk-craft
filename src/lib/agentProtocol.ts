@@ -41,7 +41,7 @@ export function resolvePresetCommand(
   project: Project,
   presets: AgentPreset[],
 ): string | undefined {
-  const presetId = pane.preset_id ?? project.agent_preset;
+  const presetId = pane.kind === "agent" ? (pane.preset_id ?? project.agent_preset) : project.agent_preset;
   return presets.find((preset) => preset.id === presetId)?.command;
 }
 

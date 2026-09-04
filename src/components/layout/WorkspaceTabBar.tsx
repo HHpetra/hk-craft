@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState } from "react";
-import { Bot, Columns2, FolderTree, Grid2x2, Plus, Square, Terminal, X } from "lucide-react";
-import type { WorkspaceLayout, WorkspacePane } from "../../types";
+import { createPortal } from "react-dom";
+import { Bot, Columns2, Container, FolderTree, Grid2x2, Plus, Square, Terminal, X } from "lucide-react";
+import type { DockerPane, WorkspaceLayout, WorkspacePane } from "../../types";
 import { cn, sessionId } from "../../lib/format";
+import { paneCaps } from "../../lib/paneCaps";
 import { paneTitle } from "../../lib/panes";
 import { DRAG_THRESHOLD, finalIndex, insertSlot, lineForSlot, type DropLine } from "../../lib/reorder";
 import { useActiveProject, useWorkspace } from "../../store/workspace";
 import { StatusDot } from "../ui/StatusDot";
+import { DockerPaneDialog } from "./DockerPaneDialog";
 
 const layouts: { id: WorkspaceLayout; label: string; shortcut: string; icon: typeof Square }[] = [
   { id: "tabs", label: "Tab 切换", shortcut: "1", icon: Square },
@@ -18,6 +21,7 @@ const PANE_SELECTOR = "[data-pane-id]";
 function paneIcon(pane: WorkspacePane) {
   if (pane.kind === "explorer") return FolderTree;
   if (pane.kind === "runner") return Terminal;
+  if (pane.kind === "docker") return Container;
   return Bot;
 }
 
@@ -30,6 +34,9 @@ export function WorkspaceTabBar() {
   const setLayout = useWorkspace((s) => s.setLayout);
   const setActivePane = useWorkspace((s) => s.setActivePane);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [dockerOpen, setDockerOpen] = useState(false);
+  const [dockerEdit, setDockerEdit] = useState<DockerPane | null>(null);
+  const [tabMenu, setTabMenu] = useState<{ pane: WorkspacePane; x: number; y: number } | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dropLine, setDropLine] = useState<DropLine | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -51,6 +58,15 @@ export function WorkspaceTabBar() {
     window.addEventListener("mousedown", onDown);
     return () => window.removeEventListener("mousedown", onDown);
   }, [menuOpen]);
+
+  useEffect(() => {
+    if (!tabMenu) return;
+    function onDown() {
+      setTabMenu(null);
+    }
+    window.addEventListener("mousedown", onDown);
+    return () => window.removeEventListener("mousedown", onDown);
+  }, [tabMenu]);
 
   useEffect(() => {
     const clearVisual = () => {
@@ -135,6 +151,12 @@ export function WorkspaceTabBar() {
                 };
               }}
               onDragStart={(event) => event.preventDefault()}
+              onContextMenu={(event) => {
+                if (paneCaps(pane.kind).contextEdit !== "docker") return;
+                event.preventDefault();
+                event.stopPropagation();
+                setTabMenu({ pane, x: event.clientX, y: event.clientY });
+              }}
               onClick={() => {
                 if (Date.now() - dragEndedAt.current < 300) return;
                 void setActivePane(pane.id);
@@ -215,6 +237,18 @@ export function WorkspaceTabBar() {
                 <Terminal size={13} />
                 运行终端
               </button>
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] text-ink-muted hover:bg-hover hover:text-ink"
+                onClick={() => {
+                  setMenuOpen(false);
+                  setDockerEdit(null);
+                  setDockerOpen(true);
+                }}
+              >
+                <Container size={13} />
+                Docker
+              </button>
               {presets.length > 0 && <div className="my-1 border-t border-line" />}
               {presets.map((preset) => (
                 <button
@@ -252,6 +286,35 @@ export function WorkspaceTabBar() {
           </button>
         ))}
       </div>
+      <DockerPaneDialog
+        open={dockerOpen || Boolean(dockerEdit)}
+        pane={dockerEdit}
+        onClose={() => {
+          setDockerOpen(false);
+          setDockerEdit(null);
+        }}
+      />
+      {tabMenu &&
+        createPortal(
+          <div
+            className="fixed z-50 min-w-24 rounded-lg border border-line bg-surface-elevated py-1 shadow-xl"
+            style={{ left: tabMenu.x, top: tabMenu.y }}
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="flex w-full px-3 py-1.5 text-left text-[12px] text-ink-muted hover:bg-hover hover:text-ink"
+              onClick={() => {
+                if (tabMenu.pane.kind === "docker") setDockerEdit(tabMenu.pane);
+                setDockerOpen(false);
+                setTabMenu(null);
+              }}
+            >
+              编辑
+            </button>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

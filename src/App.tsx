@@ -12,7 +12,7 @@ import { usePathDropListeners } from "./lib/dnd";
 import { discoverLocalNerdFonts, setPreferredTerminalFont } from "./lib/terminalFonts";
 import {
   applyRegisteredTerminalFont,
-  ensurePtyOutputListener,
+  ensurePtyListeners,
 } from "./lib/termRegistry";
 import { useWorkspace } from "./store/workspace";
 
@@ -28,7 +28,7 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false;
-    void ensurePtyOutputListener()
+    void ensurePtyListeners()
       .then(() => {
         if (!cancelled) return bootstrap();
       })

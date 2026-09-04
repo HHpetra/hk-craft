@@ -1,4 +1,5 @@
-import type { SessionStatus } from "../types";
+import type { SessionKind, SessionStatus } from "../types";
+import { paneCaps } from "./paneCaps";
 
 export function projectBadge(...statuses: Array<SessionStatus | undefined>): SessionStatus {
   const ranks: SessionStatus[] = ["error", "running", "waiting", "exited", "idle"];
@@ -20,6 +21,6 @@ export function statusDotExtra(status: SessionStatus | undefined) {
   return "";
 }
 
-export function sessionKindLabel(kind: "agent" | "runner") {
-  return kind === "agent" ? "Agent" : "运行终端";
+export function sessionKindLabel(kind: SessionKind) {
+  return paneCaps(kind).label;
 }

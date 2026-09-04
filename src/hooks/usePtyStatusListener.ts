@@ -1,6 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import { useEffect } from "react";
-import type { PtyExit, PtyOutput } from "../types";
+import type { PtyExit, PtyOutput, SessionKind } from "../types";
 import { parseSessionId } from "../lib/format";
 import { notifyTaskDone } from "../lib/notify";
 import {
@@ -11,11 +11,12 @@ import {
   notePtyOutput,
   SILENCE_MS,
 } from "../lib/ptyActivity";
+import { isPaneLaunching } from "../lib/paneLaunchLock";
 import { sessionKindLabel } from "../lib/status";
 import { isCurrentGeneration } from "../lib/termRegistry";
 import { useWorkspace } from "../store/workspace";
 
-function kindFromSession(sessionId: string): "agent" | "runner" {
+function kindFromSession(sessionId: string): SessionKind {
   return parseSessionId(sessionId)?.kind ?? "agent";
 }
 
@@ -81,6 +82,7 @@ export function usePtyStatusListener() {
     void listen<PtyExit>("pty-exit", (event) => {
       const id = event.payload.session_id;
       if (!isOpenedSession(id)) return;
+      if (isPaneLaunching(id)) return;
       if (!isCurrentGeneration(id, event.payload.generation ?? 0)) return;
       const track = getPtyActivity(id);
       clearPtyTimer(track);

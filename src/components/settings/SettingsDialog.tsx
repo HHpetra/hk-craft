@@ -87,19 +87,18 @@ export function SettingsDialog() {
       return;
     }
     const fallback = presets[0].id;
-    const projects = current.projects.map((project) => {
-      const bound = projectPresets[project.id] ?? project.agent_preset;
-      return {
-        ...project,
-        agent_preset: presets.some((p) => p.id === bound) ? bound : fallback,
-      };
-    });
-    void persist({
-      ...current,
+    void persist((latest) => ({
+      ...latest,
       agent_presets: presets,
       bookmarks,
-      projects,
-    }).then((ok) => {
+      projects: latest.projects.map((project) => {
+        const bound = projectPresets[project.id] ?? project.agent_preset;
+        return {
+          ...project,
+          agent_preset: presets.some((p) => p.id === bound) ? bound : fallback,
+        };
+      }),
+    })).then((ok) => {
       if (!ok) return;
       setOpen(false);
       useWorkspace.getState().restartOpenedAgentsForPresetChange(current.agent_presets, presets);

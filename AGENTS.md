@@ -34,10 +34,10 @@
 2. **🤖 Agent 终端 (Agent CLI)**：专用于运行 `cursor-agent`、`opencode`、`claude`、`codex`、`dsh-tui` 等 CLI 交互；默认使用项目绑定的 Agent 预设，也可再开与默认不同的 Agent 面板。
 3. **⚡ 运行终端 (Runner Terminal)**：纯净的系统 Shell，用于本地测试、编译、开发服务器运行。
 
-同一项目可同时打开多个资源管理器、多个 Agent、多个运行终端。每个终端面板对应独立的 PTY（`{projectId}:{kind}:{paneId}`）。
+同一项目可同时打开多个资源管理器、多个 Agent、多个运行终端，以及可选的 **Docker** 面板（`+` 菜单手动添加，不随新项目默认打开）。每个终端面板对应独立的 PTY（`{projectId}:{kind}:{paneId}`）。
 
 ### 2.2 面板 Tab 与三种布局
-顶栏为当前项目的面板 Tab 列表，末尾 `+` 新增面板（资源管理器 / 运行终端 / 任意 Agent 预设），最右侧为布局切换：
+顶栏为当前项目的面板 Tab 列表，末尾 `+` 新增面板（资源管理器 / 运行终端 / Docker / 任意 Agent 预设），最右侧为布局切换：
 - **Tab 切换** (`Ctrl+1`)：只显示焦点面板，其余保持挂载。
 - **一行平铺** (`Ctrl+2`)：全部面板横排分屏，可拖动分界。
 - **两行平铺** (`Ctrl+3`)：两个及以上面板时分成两行（`cols = ceil(n/2)`），单数时留空一格；仅 1 个面板时退化为整页。
@@ -48,12 +48,14 @@
 - PTY 进程完全运行并驻留在 Rust 后端。
 - 前端切换左侧项目、切换 Tab/布局仅改变 DOM 挂载或可见性，**绝对不可销毁后台 PTY 进程或丢失终端输出缓冲区**。
 - 左侧项目可收纳：收纳会关闭该项目本轮 PTY，但保留布局、Agent session 与 Runner 历史；彻底移除只从收纳区执行。
-- Runner 底部可保存项目常用命令：左键写入当前 PTY（末尾 Enter），顺序与正文按项目写入 `config.toml`。
+- Runner / Docker 底部可保存项目常用命令：左键写入当前 PTY（末尾 Enter），顺序与正文按项目写入 `config.toml`。同一项目的 Runner 与 Docker 面板共用这份列表。
+- Docker 面板绑定容器名（非项目级自动连接）：打开时若容器已停止会先 `docker start`（paused 会 `unpause`），等到 Running 后再 `docker exec`；start 后立即 `exited`/`dead` 会立刻失败。`/bin/sh` 在容器内不存在时等 exec 真正失败（PTY 退出或 Docker/OCI 缺解释器报错）再回退 `/bin/bash`，并先清掉旧 session；单纯静默超时不杀进程。打开项目时各面板并行 spawn，Docker 探测/注入不挡住 Agent/Runner；配置 persist 串行排队，并行启动按最新 config 合并写入。可选把多行命令在 PTY 静默后再注入；PTY 已退出或无输出超时则不再注入。右键 Docker Tab 可编辑容器与自动执行命令；原容器不在列表中时保留原名并禁止保存。默认项目布局不含 Docker Tab。
 
 ### 2.4 内部拖拽注入协议 (Drag-to-Inject Protocol)
 - 从内部文件管理器拖拽文件至终端时：
   - **拖入 Agent 终端**：自动格式化并带上前缀（如 `@C:\path\to\file.ts`，支持在配置中自定义前缀）。
   - **拖入 Runner 终端**：自动格式化为标准双引号转义绝对路径（如 `"C:\path\to\file.ts"`）。
+  - **拖入 Docker 终端**：不注入（宿主机路径对容器无意义）。
 
 ---
 
@@ -86,6 +88,7 @@
 │       ├── config/             # TOML 配置读写与持久化
 │       ├── session.rs          # Agent session 发现
 │       ├── clipboard.rs
+│       ├── docker.rs           # 列出/启动本机 Docker 容器
 │       ├── update.rs           # GitHub Releases 检查更新
 │       ├── runner.rs
 │       └── error.rs
