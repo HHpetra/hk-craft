@@ -4,7 +4,7 @@ import { cn } from "../../lib/format";
 import { paneSessionId, terminalPanes } from "../../lib/panes";
 import { stowedProjects, workingProjects, type ProjectGroup } from "../../lib/projects";
 import { DRAG_THRESHOLD, finalIndex, insertSlot, lineForSlot, type DropLine } from "../../lib/reorder";
-import { projectBadge } from "../../lib/status";
+import { projectBadge, statusRowClass } from "../../lib/status";
 import { useWorkspace } from "../../store/workspace";
 import type { Project } from "../../types";
 import { StatusDot } from "../ui/StatusDot";
@@ -313,7 +313,7 @@ function ProjectRow({
       data-stowed-id={working ? undefined : project.id}
       className={cn(
         "group relative mx-1.5 flex cursor-grab touch-none select-none items-center gap-2 rounded px-2 py-1.5 hover:bg-hover",
-        active && "bg-active",
+        statusRowClass(badge, active),
         dragging && "cursor-grabbing opacity-40",
       )}
       tabIndex={working ? 0 : undefined}

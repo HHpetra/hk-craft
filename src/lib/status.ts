@@ -16,8 +16,16 @@ export function statusDotClass(status: SessionStatus | undefined) {
   return "bg-(--color-ink-subtle)";
 }
 
-export function statusDotExtra(status: SessionStatus | undefined) {
-  if (status === "running") return "status-running";
+export function statusRowClass(status: SessionStatus | undefined, active = false) {
+  if (active) {
+    if (status === "running") return "bg-(--color-success)/25";
+    if (status === "waiting") return "bg-(--color-warning)/25";
+    if (status === "error") return "bg-(--color-danger)/25";
+    return "bg-active";
+  }
+  if (status === "running") return "bg-(--color-success)/15";
+  if (status === "waiting") return "bg-(--color-warning)/15";
+  if (status === "error") return "bg-(--color-danger)/15";
   return "";
 }
 
