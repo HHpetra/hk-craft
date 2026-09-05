@@ -63,8 +63,8 @@
 
 ### 下载安装
 前往 [GitHub Releases](https://github.com/hongshan-tech/hk-craft/releases) 下载最新版本的安装包：
-- **Windows 安装向导**: `HK-Craft_0.2.0_x64-setup.exe` (NSIS)
-- **Windows MSI 安装包**: `HK-Craft_0.2.0_x64_en-US.msi`
+- **Windows 安装向导**: `HK-Craft_0.3.0_x64-setup.exe` (NSIS)
+- **Windows MSI 安装包**: `HK-Craft_0.3.0_x64_en-US.msi`
 
 > 💡 *个人开发者未购买昂贵签名证书时，Windows SmartScreen 可能会弹出提示，点击「更多信息」→「仍要运行」即可正常安装。*
 
