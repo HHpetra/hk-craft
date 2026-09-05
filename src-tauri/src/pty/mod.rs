@@ -182,14 +182,17 @@ impl PtyManager {
         let history = crate::runner::history_path_for_session(&opts.session_id)
             .ok()
             .flatten();
-        let mut cmd = build_command(&opts.command, &opts.args, history.as_deref());
+        let hook_vars = crate::opencode_hook::prepare_spawn_env(&opts.command, &opts.session_id);
+        let mut cmd = build_command(&opts.command, &opts.args, history.as_deref(), &hook_vars);
         cmd.cwd(&opts.cwd);
         apply_user_shell_env(&mut cmd);
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
         cmd.env("PYTHONIOENCODING", "utf-8");
         apply_color_theme_env(&mut cmd, theme);
-        crate::opencode_hook::apply_spawn_env(&mut cmd, &opts.command, &opts.session_id);
+        for (key, value) in &hook_vars {
+            cmd.env(key, value);
+        }
         #[cfg(not(windows))]
         if let Some(path) = history.as_ref() {
             cmd.env("HISTFILE", path);
@@ -508,7 +511,12 @@ fn quote_cmd_arg(value: &str) -> String {
     format!("\"{}\"", value.replace('"', "\\\""))
 }
 
-fn build_command(command: &str, args: &[String], history_path: Option<&Path>) -> CommandBuilder {
+fn build_command(
+    command: &str,
+    args: &[String],
+    history_path: Option<&Path>,
+    extra_env: &[(String, String)],
+) -> CommandBuilder {
     let (program, program_args) = if command.trim().is_empty() {
         default_shell(history_path)
     } else {
@@ -535,6 +543,7 @@ fn build_command(command: &str, args: &[String], history_path: Option<&Path>) ->
         cmd.arg("/s");
         cmd.arg("/c");
         let mut line = String::from("chcp 65001 >nul & ");
+        line.push_str(&crate::opencode_hook::windows_cmd_env_prefix(extra_env));
         line.push_str(&quote_cmd_arg(&program));
         for arg in program_args {
             line.push(' ');
@@ -546,6 +555,7 @@ fn build_command(command: &str, args: &[String], history_path: Option<&Path>) ->
 
     #[cfg(not(windows))]
     {
+        let _ = extra_env;
         let mut cmd = CommandBuilder::new(&program);
         for arg in program_args {
             cmd.arg(arg);

@@ -15,7 +15,7 @@ export function assignmentFromOpencodeHook(
   const parsed = parseSessionId(event.session_id);
   if (!parsed || parsed.kind !== "agent") return null;
   const id = event.opencode_id.trim();
-  if (!id) return null;
+  if (!id.startsWith("ses_") || id.length > 64) return null;
   const project = config?.projects.find((item) => item.id === parsed.projectId);
   const pane = project?.panes.find((item) => item.id === parsed.paneId);
   if (!pane || pane.kind !== "agent") return null;

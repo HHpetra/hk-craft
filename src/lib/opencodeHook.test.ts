@@ -63,5 +63,8 @@ describe("assignmentFromOpencodeHook", () => {
     expect(
       assignmentFromOpencodeHook({ session_id: "proj:agent:a1", opencode_id: "ses_abc" }, null),
     ).toBeNull();
+    expect(
+      assignmentFromOpencodeHook({ session_id: "proj:agent:a1", opencode_id: "msg_abc" }, open),
+    ).toBeNull();
   });
 });
