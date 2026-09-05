@@ -2,45 +2,51 @@
 
 :root,
 :root[data-theme="dark"] {
-  --bg: #0c0c0e;
-  --bg-sidebar: #101012;
-  --bg-panel: #121214;
-  --bg-elevated: #18181b;
-  --bg-header: #141416;
-  --bg-term: #0e0e10;
-  --fg: #e4e4e7;
-  --fg-muted: #a1a1aa;
-  --fg-subtle: #71717a;
-  --border: rgb(255 255 255 / 0.07);
-  --hover: rgb(255 255 255 / 0.05);
-  --active: rgb(255 255 255 / 0.09);
-  --input: rgb(255 255 255 / 0.06);
-  --btn: #e4e4e7;
-  --btn-fg: #18181b;
-  --accent: #60a5fa;
-  --accent-dim: rgb(96 165 250 / 0.15);
-  --focus-ring: rgb(96 165 250 / 0.5);
+  --bg: #282828;
+  --bg-sidebar: #32302f;
+  --bg-panel: #3c3836;
+  --bg-elevated: #504945;
+  --bg-header: #3c3836;
+  --bg-term: #282828;
+  --fg: #ebdbb2;
+  --fg-muted: #d5c4a1;
+  --fg-subtle: #a89984;
+  --border: rgb(80 73 69 / 0.55);
+  --hover: rgb(80 73 69 / 0.4);
+  --active: rgb(102 92 84 / 0.5);
+  --input: rgb(80 73 69 / 0.5);
+  --btn: #ebdbb2;
+  --btn-fg: #282828;
+  --accent: #fe8019;
+  --accent-dim: rgb(254 128 25 / 0.15);
+  --focus-ring: rgb(254 128 25 / 0.55);
+  --success: #b8bb26;
+  --warning: #fabd2f;
+  --danger: #fb4934;
 }
 
 :root[data-theme="light"] {
-  --bg: #f4f4f5;
-  --bg-sidebar: #ececee;
-  --bg-panel: #f7f7f8;
-  --bg-elevated: #ffffff;
-  --bg-header: #f0f0f2;
-  --bg-term: #fafafa;
-  --fg: #18181b;
-  --fg-muted: #52525b;
-  --fg-subtle: #71717a;
-  --border: rgb(24 24 27 / 0.1);
-  --hover: rgb(24 24 27 / 0.05);
-  --active: rgb(24 24 27 / 0.09);
-  --input: rgb(24 24 27 / 0.06);
-  --btn: #18181b;
-  --btn-fg: #fafafa;
-  --accent: #2563eb;
-  --accent-dim: rgb(37 99 235 / 0.1);
-  --focus-ring: rgb(37 99 235 / 0.4);
+  --bg: #f1f1f1;
+  --bg-sidebar: #e9e1db;
+  --bg-panel: #ede5df;
+  --bg-elevated: #fbfaf8;
+  --bg-header: #e9e1db;
+  --bg-term: #f1f1f1;
+  --fg: #54433a;
+  --fg-muted: #7d6658;
+  --fg-subtle: #a98a78;
+  --border: rgb(84 67 58 / 0.12);
+  --hover: rgb(84 67 58 / 0.06);
+  --active: rgb(201 123 139 / 0.12);
+  --input: rgb(84 67 58 / 0.08);
+  --btn: #54433a;
+  --btn-fg: #f1f1f1;
+  --accent: #bc5c00;
+  --accent-dim: rgb(188 92 0 / 0.12);
+  --focus-ring: rgb(188 92 0 / 0.45);
+  --success: #3a684a;
+  --warning: #a06d00;
+  --danger: #bf0021;
 }
 
 @theme inline {
@@ -61,6 +67,9 @@
   --color-btn-fg: var(--btn-fg);
   --color-accent: var(--accent);
   --color-accent-dim: var(--accent-dim);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
 }
 
 html,

@@ -51,7 +51,7 @@ function TerminalHost({
             className={cn(
               "absolute inset-0 z-30 rounded-sm border-2",
               dragging && interactive
-                ? "pointer-events-auto border-sky-400/70 bg-sky-400/10"
+                ? "pointer-events-auto border-(--color-accent) bg-(--color-accent-dim)"
                 : "pointer-events-none border-transparent",
             )}
             onDragOver={onDragOver}

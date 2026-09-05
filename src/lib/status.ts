@@ -10,10 +10,10 @@ export function projectBadge(...statuses: Array<SessionStatus | undefined>): Ses
 }
 
 export function statusDotClass(status: SessionStatus | undefined) {
-  if (status === "running") return "bg-emerald-500";
-  if (status === "waiting") return "bg-sky-400";
-  if (status === "error") return "bg-red-500";
-  return "bg-zinc-600";
+  if (status === "running") return "bg-(--color-success)";
+  if (status === "waiting") return "bg-(--color-warning)";
+  if (status === "error") return "bg-(--color-danger)";
+  return "bg-(--color-ink-subtle)";
 }
 
 export function statusDotExtra(status: SessionStatus | undefined) {

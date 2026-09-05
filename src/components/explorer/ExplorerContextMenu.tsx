@@ -38,7 +38,7 @@ function Item({
       type="button"
       disabled={disabled}
       className={`flex w-full px-3 py-1.5 text-left text-[12px] ${
-        danger ? "text-red-500" : "text-ink-muted"
+        danger ? "text-(--color-danger)" : "text-ink-muted"
       } hover:bg-hover hover:text-ink disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-ink-muted`}
       onClick={onPick}
     >
