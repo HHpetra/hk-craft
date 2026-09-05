@@ -26,10 +26,10 @@
 }
 
 :root[data-theme="light"] {
-  --bg: #f1f1f1;
+  --bg: #f8f5ef;
   --bg-sidebar: #e9e1db;
   --bg-panel: #ede5df;
-  --bg-elevated: #fbfaf8;
+  --bg-elevated: #fdfbf8;
   --bg-header: #e9e1db;
   --bg-term: #f5f1ec;
   --fg: #54433a;
@@ -40,7 +40,7 @@
   --active: rgb(201 123 139 / 0.12);
   --input: rgb(84 67 58 / 0.08);
   --btn: #54433a;
-  --btn-fg: #f1f1f1;
+  --btn-fg: #f8f5ef;
   --accent: #bc5c00;
   --accent-dim: rgb(188 92 0 / 0.12);
   --focus-ring: rgb(188 92 0 / 0.45);
