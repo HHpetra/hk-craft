@@ -10,6 +10,7 @@ import type {
 } from "../types";
 import { sessionId } from "./format";
 import { paneCaps } from "./paneCaps";
+import { getPtyActivity, isInFlightTask, type PtyActivityTrack } from "./ptyActivity";
 
 export function normalizeLayout(value: string | undefined): WorkspaceLayout {
   if (value === "tabs" || value === "row" || value === "grid") return value;
@@ -67,12 +68,12 @@ export type ActiveSessionSnapshot = {
   sessionStatus: Record<string, SessionStatus | undefined>;
 };
 
-function isActiveStatus(status: SessionStatus | undefined) {
-  return status === "running" || status === "waiting";
-}
-
-/** Opened terminal panes whose PTY is still running or waiting (idle / exited / error excluded). */
-export function activeRunningSessions(snapshot: ActiveSessionSnapshot): ActiveSession[] {
+/** Opened terminal panes with a user-started task still in flight (not idle TUI / prompt). */
+export function activeRunningSessions(
+  snapshot: ActiveSessionSnapshot,
+  getTrack: (sessionId: string) => PtyActivityTrack = getPtyActivity,
+  now = Date.now(),
+): ActiveSession[] {
   if (!snapshot.config) return [];
   const found: ActiveSession[] = [];
   for (const project of snapshot.config.projects) {
@@ -80,7 +81,7 @@ export function activeRunningSessions(snapshot: ActiveSessionSnapshot): ActiveSe
     for (const pane of terminalPanes(project)) {
       const sid = paneSessionId(project.id, pane);
       if (!sid) continue;
-      if (!isActiveStatus(snapshot.sessionStatus[sid])) continue;
+      if (!isInFlightTask(getTrack(sid), now)) continue;
       found.push({ projectName: project.name, kind: pane.kind });
     }
   }

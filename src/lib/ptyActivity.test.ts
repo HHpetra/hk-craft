@@ -4,6 +4,8 @@ import {
   decidePtyExit,
   decidePtySilence,
   ECHO_GRACE_MS,
+  isInFlightTask,
+  markPtyIdle,
   notePtyOutput,
   NOTIFY_BUSY_MS,
   USER_WAIT_MS,
@@ -18,6 +20,32 @@ describe("pty activity interpretation", () => {
     expect(track.runningSince).toBeNull();
     notePtyOutput(track, typed + ECHO_GRACE_MS + 1);
     expect(track.runningSince).toBe(typed + ECHO_GRACE_MS + 1);
+  });
+
+  it("does not start a busy clock for spawn banners or idle TUI redraws", () => {
+    const spawn = createPtyActivityTrack();
+    notePtyOutput(spawn, 1_000);
+    expect(spawn.runningSince).toBeNull();
+
+    const idle = createPtyActivityTrack();
+    idle.lastUserWrite = 2_000;
+    markPtyIdle(idle, 5_000);
+    notePtyOutput(idle, 5_500);
+    expect(idle.runningSince).toBeNull();
+
+    idle.lastUserWrite = 6_000;
+    notePtyOutput(idle, 6_000 + ECHO_GRACE_MS + 1);
+    expect(idle.runningSince).toBe(6_000 + ECHO_GRACE_MS + 1);
+  });
+
+  it("treats only a user-started busy clock as an in-flight task", () => {
+    const track = createPtyActivityTrack();
+    expect(isInFlightTask(track, 10_000)).toBe(false);
+    track.runningSince = 9_000;
+    track.lastUserWrite = 10_000 - USER_WAIT_MS - 1;
+    expect(isInFlightTask(track, 10_000)).toBe(true);
+    track.lastUserWrite = 10_000 - USER_WAIT_MS + 10;
+    expect(isInFlightTask(track, 10_000)).toBe(false);
   });
 
   it("treats silence after editing the prompt as waiting, not a finished task", () => {

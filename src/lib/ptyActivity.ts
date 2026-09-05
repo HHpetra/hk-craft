@@ -8,6 +8,8 @@ export type PtyActivityTrack = {
   lastOutput: number;
   lastUserWrite: number;
   runningSince: number | null;
+  /** Last time output went silent long enough to count as idle-at-prompt. */
+  idleSince: number | null;
   timer: ReturnType<typeof setTimeout> | null;
 };
 
@@ -24,7 +26,7 @@ export type PtyExitDecision = {
 const tracks = new Map<string, PtyActivityTrack>();
 
 export function createPtyActivityTrack(): PtyActivityTrack {
-  return { lastOutput: 0, lastUserWrite: 0, runningSince: null, timer: null };
+  return { lastOutput: 0, lastUserWrite: 0, runningSince: null, idleSince: null, timer: null };
 }
 
 export function getPtyActivity(sessionId: string): PtyActivityTrack {
@@ -62,12 +64,30 @@ export function shouldNotifyBusy(runningSince: number | null, now = Date.now()) 
   return runningSince !== null && now - runningSince >= NOTIFY_BUSY_MS;
 }
 
-/** Bytes from the PTY. Echo of the user's own keystrokes does not start a busy clock. */
+export function markPtyIdle(track: PtyActivityTrack, now = Date.now()) {
+  track.runningSince = null;
+  track.idleSince = now;
+}
+
+/** A user-started task is still producing output — not spawn banners, prompt redraws, or typing. */
+export function isInFlightTask(track: PtyActivityTrack, now = Date.now()) {
+  return track.runningSince !== null && !isRecentPtyUserInput(track, USER_WAIT_MS, now);
+}
+
+function canStartBusyClock(track: PtyActivityTrack, now: number) {
+  if (track.runningSince !== null) return false;
+  if (isPtyEcho(track, now)) return false;
+  if (track.lastUserWrite === 0) return false;
+  if (track.idleSince !== null && track.lastUserWrite <= track.idleSince) return false;
+  return true;
+}
+
+/** Bytes from the PTY. Echo, spawn banners, and idle TUI redraws do not start a busy clock. */
 export function notePtyOutput(track: PtyActivityTrack, now = Date.now()) {
   track.lastOutput = now;
-  if (!isPtyEcho(track, now) && track.runningSince === null) {
-    track.runningSince = now;
-  }
+  if (!canStartBusyClock(track, now)) return;
+  track.runningSince = now;
+  track.idleSince = null;
 }
 
 export function decidePtySilence(
@@ -89,5 +109,6 @@ export function decidePtyExit(
 ): PtyExitDecision {
   const notify = shouldNotifyBusy(track.runningSince, now);
   track.runningSince = null;
+  track.idleSince = now;
   return { notify, status: success ? "exited" : "error" };
 }

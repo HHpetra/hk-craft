@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { activeRunningSessions } from "./panes";
+import { createPtyActivityTrack, type PtyActivityTrack } from "./ptyActivity";
 import type { AppConfig, Project, SessionStatus, WorkspacePane } from "../types";
 
 const explorer: WorkspacePane = { id: "e1", kind: "explorer" };
@@ -38,12 +39,32 @@ function config(projects: Project[]): AppConfig {
   };
 }
 
-function sessions(map: Record<string, SessionStatus>) {
-  return activeRunningSessions({
-    config: config([project()]),
-    openedProjectIds: ["proj"],
-    sessionStatus: map,
-  });
+function inFlight(): PtyActivityTrack {
+  const track = createPtyActivityTrack();
+  track.lastUserWrite = 1_000;
+  track.runningSince = 2_000;
+  track.lastOutput = 3_000;
+  return track;
+}
+
+function idleTui(): PtyActivityTrack {
+  const track = createPtyActivityTrack();
+  track.lastUserWrite = 1_000;
+  track.idleSince = 4_000;
+  track.lastOutput = 5_000;
+  return track;
+}
+
+function sessions(map: Record<string, SessionStatus>, tracks: Record<string, PtyActivityTrack> = {}) {
+  return activeRunningSessions(
+    {
+      config: config([project()]),
+      openedProjectIds: ["proj"],
+      sessionStatus: map,
+    },
+    (sid) => tracks[sid] ?? createPtyActivityTrack(),
+    10_000,
+  );
 }
 
 describe("activeRunningSessions", () => {
@@ -58,18 +79,15 @@ describe("activeRunningSessions", () => {
     ).toEqual([]);
   });
 
-  it("counts running and waiting terminal panes", () => {
-    expect(sessions({ "proj:agent:a1": "running" })).toEqual([{ projectName: "demo", kind: "agent" }]);
-    expect(sessions({ "proj:runner:r1": "waiting" })).toEqual([{ projectName: "demo", kind: "runner" }]);
+  it("counts user-started in-flight tasks, not idle Agent TUI redraws", () => {
     expect(
-      sessions({
-        "proj:agent:a1": "running",
-        "proj:docker:d1": "waiting",
-      }),
-    ).toEqual([
-      { projectName: "demo", kind: "agent" },
-      { projectName: "demo", kind: "docker" },
-    ]);
+      sessions({ "proj:agent:a1": "running" }, { "proj:agent:a1": inFlight() }),
+    ).toEqual([{ projectName: "demo", kind: "agent" }]);
+    expect(
+      sessions({ "proj:agent:a1": "running" }, { "proj:agent:a1": idleTui() }),
+    ).toEqual([]);
+    expect(sessions({ "proj:agent:a1": "running" })).toEqual([]);
+    expect(sessions({ "proj:runner:r1": "waiting" })).toEqual([]);
   });
 
   it("ignores idle, exited, and error", () => {
@@ -84,17 +102,20 @@ describe("activeRunningSessions", () => {
 
   it("ignores closed projects and explorer panes", () => {
     expect(
-      activeRunningSessions({
-        config: config([project()]),
-        openedProjectIds: [],
-        sessionStatus: { "proj:agent:a1": "running" },
-      }),
+      activeRunningSessions(
+        {
+          config: config([project()]),
+          openedProjectIds: [],
+          sessionStatus: { "proj:agent:a1": "running" },
+        },
+        () => inFlight(),
+      ),
     ).toEqual([]);
     expect(
-      sessions({
-        "proj:explorer:e1": "running",
-        "proj:agent:a1": "idle",
-      }),
+      sessions(
+        { "proj:explorer:e1": "running", "proj:agent:a1": "idle" },
+        { "proj:explorer:e1": inFlight() },
+      ),
     ).toEqual([]);
   });
 });

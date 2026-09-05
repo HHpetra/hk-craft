@@ -8,6 +8,7 @@ import {
   decidePtyExit,
   decidePtySilence,
   getPtyActivity,
+  markPtyIdle,
   notePtyOutput,
   SILENCE_MS,
 } from "../lib/ptyActivity";
@@ -51,7 +52,7 @@ function scheduleSilence(sessionId: string) {
     const decision = decidePtySilence(track, state.sessionStatus[sessionId]);
     if (!decision.toWaiting) return;
     if (decision.notify) notifyDone(sessionId);
-    track.runningSince = null;
+    markPtyIdle(track);
     state.setSessionStatus(sessionId, "waiting");
   }, SILENCE_MS);
 }
