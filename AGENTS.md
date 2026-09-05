@@ -48,6 +48,7 @@
 - PTY 进程完全运行并驻留在 Rust 后端。
 - 前端切换左侧项目、切换 Tab/布局仅改变 DOM 挂载或可见性，**绝对不可销毁后台 PTY 进程或丢失终端输出缓冲区**。
 - 左侧项目可收纳：收纳会关闭该项目本轮 PTY，但保留布局、Agent session 与 Runner 历史；彻底移除只从收纳区执行。
+- OpenCode 面板通过全局惰性插件（`~/.config/opencode/plugins/hk-craft.js`）上报顶层 session id，写入该面板的 `agent_session_id`；关项目后再开用 `opencode --session <id>` 续跑。插件没有 HK-Craft 注入的环境变量时不生效。
 - Runner / Docker 底部可保存项目常用命令：左键写入当前 PTY（末尾 Enter），顺序与正文按项目写入 `config.toml`。同一项目的 Runner 与 Docker 面板共用这份列表。
 - Docker 面板绑定容器名（非项目级自动连接）：打开时若容器已停止会先 `docker start`（paused 会 `unpause`），等到 Running 后再 `docker exec`；start 后立即 `exited`/`dead` 会立刻失败。`/bin/sh` 在容器内不存在时等 exec 真正失败（PTY 退出或 Docker/OCI 缺解释器报错）再回退 `/bin/bash`，并先清掉旧 session；单纯静默超时不杀进程。打开项目时各面板并行 spawn，Docker 探测/注入不挡住 Agent/Runner；配置 persist 串行排队，并行启动按最新 config 合并写入。可选把多行命令在 PTY 静默后再注入；PTY 已退出或无输出超时则不再注入。右键 Docker Tab 可编辑容器与自动执行命令；原容器不在列表中时保留原名并禁止保存。默认项目布局不含 Docker Tab。
 
@@ -87,6 +88,7 @@
 │       ├── fs/                 # 文件系统读取、元数据解析
 │       ├── config/             # TOML 配置读写与持久化
 │       ├── session.rs          # Agent session 发现
+│       ├── opencode_hook.rs    # OpenCode 插件安装与 session id 上报
 │       ├── clipboard.rs
 │       ├── docker.rs           # 列出/启动本机 Docker 容器
 │       ├── update.rs           # GitHub Releases 检查更新

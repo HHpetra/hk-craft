@@ -51,7 +51,7 @@ fn spec_for(command: &str) -> Option<&'static AgentSpec> {
         .find(|spec| spec.bins.iter().any(|name| name == &bin))
 }
 
-fn agent_bin(command: &str) -> String {
+pub(crate) fn agent_bin(command: &str) -> String {
     command
         .trim()
         .split_whitespace()

@@ -3,6 +3,7 @@ mod config;
 mod docker;
 mod error;
 mod fs;
+mod opencode_hook;
 mod pty;
 mod runner;
 mod session;
@@ -37,6 +38,7 @@ pub fn run() {
             };
             let pty = Arc::new(PtyManager::new());
             pty.start_reaper(app.handle().clone());
+            opencode_hook::start(app.handle().clone());
             app.manage(AppState {
                 config: Mutex::new(cfg),
                 config_path,

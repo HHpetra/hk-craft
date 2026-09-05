@@ -113,6 +113,11 @@ export interface PtyExit {
   generation?: number;
 }
 
+export interface OpencodeHookEvent {
+  session_id: string;
+  opencode_id: string;
+}
+
 export interface SpawnOpts {
   sessionId: string;
   cwd: string;

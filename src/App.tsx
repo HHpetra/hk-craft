@@ -7,6 +7,7 @@ import { applyRegisteredXtermTheme } from "./components/terminal/TerminalPane";
 import { useOsFileDrop } from "./hooks/useOsFileDrop";
 import { usePtyStatusListener } from "./hooks/usePtyStatusListener";
 import { useAgentSessionCapture } from "./hooks/useAgentSessionCapture";
+import { useOpencodeSessionHook } from "./hooks/useOpencodeSessionHook";
 import { applyDocumentTheme } from "./lib/theme";
 import { usePathDropListeners } from "./lib/dnd";
 import { discoverLocalNerdFonts, setPreferredTerminalFont } from "./lib/terminalFonts";
@@ -25,6 +26,7 @@ export default function App() {
   useOsFileDrop();
   usePathDropListeners();
   useAgentSessionCapture();
+  useOpencodeSessionHook();
 
   useEffect(() => {
     let cancelled = false;

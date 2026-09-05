@@ -189,6 +189,7 @@ impl PtyManager {
         cmd.env("COLORTERM", "truecolor");
         cmd.env("PYTHONIOENCODING", "utf-8");
         apply_color_theme_env(&mut cmd, theme);
+        crate::opencode_hook::apply_spawn_env(&mut cmd, &opts.command, &opts.session_id);
         #[cfg(not(windows))]
         if let Some(path) = history.as_ref() {
             cmd.env("HISTFILE", path);
