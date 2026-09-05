@@ -16,6 +16,12 @@ const oc: AgentPreset = {
   command: "opencode",
   drag_prefix: "@",
 };
+const dsh: AgentPreset = {
+  id: "dsh-tui",
+  name: "dsh-tui",
+  command: "dsh-tui",
+  drag_prefix: "@",
+};
 
 function project(partial: Partial<Project> = {}): Project {
   return {
@@ -103,12 +109,35 @@ describe("planPaneLaunch", () => {
     });
   });
 
-  it("resumes an agent and falls back to a bare spawn that clears the session id", () => {
+  it("resumes cursor-agent without a bare-spawn fallback", () => {
     const plan = planPaneLaunch({
       mode: "ensure",
       project: project({ panes: [agentPane], agent_seen: false }),
       pane: agentPane,
       presets: [cursor],
+      resumeOnStart: true,
+      status: "exited",
+      agentSeen: false,
+    });
+    expect(plan?.action).toBe("spawn");
+    if (plan?.action !== "spawn" || plan.kind !== "agent") throw new Error("expected agent spawn");
+    expect(plan.spawn.args).toEqual(["--resume", "chat-9"]);
+    expect(plan.resumeFallback).toBeNull();
+    expect(plan.markAgentSeen).toBe(true);
+  });
+
+  it("resumes dsh-tui and falls back to a bare spawn that clears the session id", () => {
+    const dshPane: WorkspacePane = {
+      id: "a1",
+      kind: "agent",
+      preset_id: "dsh-tui",
+      agent_session_id: "chat-9",
+    };
+    const plan = planPaneLaunch({
+      mode: "ensure",
+      project: project({ panes: [dshPane], agent_preset: "dsh-tui", agent_seen: false }),
+      pane: dshPane,
+      presets: [dsh],
       resumeOnStart: true,
       status: "exited",
       agentSeen: false,

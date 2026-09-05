@@ -5,6 +5,7 @@ import {
   liveAgentTargets,
   resolveAgentCommand,
   resumeArgsForSession,
+  resumeHardFails,
 } from "./agentProtocol";
 
 const cursor: AgentPreset = {
@@ -45,6 +46,10 @@ describe("agent protocol table", () => {
     expect(resumeArgsForSession(String.raw`C:\bin\codex.exe`, "s1")).toEqual(["resume", "s1"]);
     expect(resumeArgsForSession("mystery", "s1")).toEqual([]);
     expect(resumeArgsForSession("cursor-agent", "  ")).toEqual([]);
+    expect(resumeHardFails("dsh-tui")).toBe(true);
+    expect(resumeHardFails("dst")).toBe(true);
+    expect(resumeHardFails("cursor-agent")).toBe(false);
+    expect(resumeHardFails("opencode")).toBe(false);
   });
 
   it("falls back to cursor-agent when a pane has no matching preset", () => {

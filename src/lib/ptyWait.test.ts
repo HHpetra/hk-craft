@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { quietWaitShouldResolve, shouldInjectPostWrite } from "./ptyQuiet";
+import { classifyResumeBootOutput, quietWaitShouldResolve, shouldInjectPostWrite } from "./ptyQuiet";
 
 describe("quietWaitShouldResolve", () => {
   it("waits until output has been quiet long enough", () => {
@@ -52,5 +52,23 @@ describe("shouldInjectPostWrite", () => {
     expect(shouldInjectPostWrite("timeout", "")).toBe(true);
     expect(shouldInjectPostWrite("exited")).toBe(false);
     expect(shouldInjectPostWrite("cancelled")).toBe(false);
+  });
+});
+
+describe("classifyResumeBootOutput", () => {
+  it("treats dsh-tui's explicit resume failure as fatal", () => {
+    expect(
+      classifyResumeBootOutput(
+        'dsh-tui: cannot resume session "abc": missing log — Drop --resume to start fresh',
+      ),
+    ).toBe("fatal");
+    expect(classifyResumeBootOutput("\x1b[?1049h")).toBe("alive");
+    expect(classifyResumeBootOutput("x".repeat(800))).toBe("unknown");
+    expect(classifyResumeBootOutput("booting")).toBe("unknown");
+    expect(
+      classifyResumeBootOutput(
+        "\x1b[?1004h\x1b[?9001h\x1b[?1049h\x1b[2J\x1b[H\x1b[?1000h",
+      ),
+    ).toBe("alive");
   });
 });

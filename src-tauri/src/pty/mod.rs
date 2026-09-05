@@ -358,6 +358,17 @@ fn spawn_extra_env(hook_vars: Vec<(String, String)>) -> Vec<(String, String)> {
 }
 
 fn apply_user_shell_env(cmd: &mut CommandBuilder) {
+    for name in [
+        "WT_SESSION",
+        "WT_PROFILE_ID",
+        "WT_DEFAULT_PROFILE",
+        "TERM_PROGRAM",
+        "TERM_PROGRAM_VERSION",
+        "TERM_PROGRAM_PATH",
+        "TERMINAL_EMULATOR",
+    ] {
+        cmd.env_remove(name);
+    }
     for (key, _) in std::env::vars_os() {
         if let Some(name) = key.to_str() {
             if is_activation_env(name) || is_host_terminal_env(name) {
@@ -540,6 +551,19 @@ fn default_shell(history_path: Option<&Path>) -> (String, Vec<String>) {
 }
 
 #[cfg_attr(not(windows), allow(dead_code))]
+fn windows_cmd_spawn_line(program: &str, args: &[String], extra_env: &[(String, String)]) -> String {
+    let mut line = String::from("chcp 65001 >nul&");
+    line.push_str(&crate::opencode_hook::windows_cmd_clear_host_terminal_prefix());
+    line.push_str(&crate::opencode_hook::windows_cmd_env_prefix(extra_env));
+    line.push_str(&quote_cmd_arg(program));
+    for arg in args {
+        line.push(' ');
+        line.push_str(&quote_cmd_arg(arg));
+    }
+    line
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
 fn quote_cmd_arg(value: &str) -> String {
     if value.is_empty() {
         return "\"\"".into();
@@ -581,14 +605,7 @@ fn build_command(
         cmd.arg("/d");
         cmd.arg("/s");
         cmd.arg("/c");
-        let mut line = String::from("chcp 65001 >nul & ");
-        line.push_str(&crate::opencode_hook::windows_cmd_env_prefix(extra_env));
-        line.push_str(&quote_cmd_arg(&program));
-        for arg in program_args {
-            line.push(' ');
-            line.push_str(&quote_cmd_arg(&arg));
-        }
-        cmd.arg(line);
+        cmd.arg(windows_cmd_spawn_line(&program, &program_args, extra_env));
         cmd
     }
 
@@ -713,9 +730,23 @@ mod tests {
         assert_eq!(extra[1].0, "TERM_PROGRAM_VERSION");
         assert_eq!(extra[2], ("HK_CRAFT_SESSION".into(), "p:agent:a1".into()));
         let prefix = crate::opencode_hook::windows_cmd_env_prefix(&extra);
-        assert!(prefix.contains(r#"set "TERM_PROGRAM=vscode" & "#));
-        assert!(prefix.contains(r#"set "TERM_PROGRAM_VERSION=5.5.0" & "#));
-        assert!(prefix.contains(r#"set "HK_CRAFT_SESSION=p:agent:a1" & "#));
+        assert!(prefix.contains("set TERM_PROGRAM=vscode&"));
+        assert!(prefix.contains("set TERM_PROGRAM_VERSION=5.5.0&"));
+        assert!(prefix.contains("set HK_CRAFT_SESSION=p:agent:a1&"));
+        assert!(!prefix.contains('"'));
+    }
+
+    #[test]
+    fn windows_cmd_spawn_line_clears_host_identity_then_sets_vscode() {
+        let extra = spawn_extra_env(Vec::new());
+        let line = windows_cmd_spawn_line("dsh-tui", &["--resume".into(), "chat-1".into()], &extra);
+        assert!(line.starts_with("chcp 65001 >nul&set WT_SESSION=&"));
+        assert!(line.contains("set TERM_PROGRAM=vscode&set TERM_PROGRAM_VERSION=5.5.0&dsh-tui --resume chat-1"));
+        let set_region = line.split("dsh-tui").next().unwrap();
+        assert!(
+            !set_region.contains('"'),
+            "quoted set KEY=value is escaped by portable-pty and never assigned: {line}"
+        );
     }
 
     #[test]

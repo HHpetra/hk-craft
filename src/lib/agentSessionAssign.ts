@@ -1,4 +1,4 @@
-import { agentBin, type LiveAgentTarget } from "./agentProtocol";
+import { agentBin, resumeHardFails, type LiveAgentTarget } from "./agentProtocol";
 import { normalizeFsPath } from "./format";
 
 export type DiscoveredSession = {
@@ -61,16 +61,61 @@ function diffsFromAssigned(claims: SessionClaim[], assigned: Map<string, string 
   return next;
 }
 
-/** Later panes that stored the same chat id as an earlier pane are cleared so they start fresh. */
-function dedupeClaims(claims: SessionClaim[]): SessionAssignment[] {
-  const used = new Set<string>();
+export type ResumeAssignOptions = {
+  /** Drop stored ids that discovery does not list (dsh-tui hard-exits on a missing log). */
+  dropMissingStored?: boolean;
+};
+
+/** Later panes that stored the same chat id as an earlier pane are cleared so they start fresh. Empty panes pick up an unclaimed discovered chat so spawn can pass --resume. Occupied panes are never stolen. */
+function assignResumeSessions(
+  claims: SessionClaim[],
+  discovered: DiscoveredSession[],
+  options: ResumeAssignOptions = {},
+): SessionAssignment[] {
+  const sessions = uniqueById(discovered);
   const assigned = new Map<string, string | null>();
+  const used = new Set<string>();
+
+  const known = new Set(sessions.map((session) => session.id));
+  const dropMissing = options.dropMissingStored === true;
+
   for (const claim of claims) {
     const current = claim.currentId?.trim();
     if (!current) continue;
+    // dsh-tui hard-exits on --resume of a missing log. Cursor/Claude keep the
+    // stored id even when discovery is incomplete — otherwise a valid chat is
+    // wiped and replaced with an unrelated file.
+    if (dropMissing && known.size > 0 && !known.has(current)) {
+      assigned.set(claim.paneId, null);
+      continue;
+    }
     if (used.has(current)) assigned.set(claim.paneId, null);
-    else used.add(current);
+    else {
+      assigned.set(claim.paneId, current);
+      used.add(current);
+    }
   }
+
+  for (const session of sessions) {
+    if (used.has(session.id)) continue;
+    const hungry = claims.filter((claim) => {
+      if (!assigned.has(claim.paneId)) return true;
+      return assigned.get(claim.paneId) === null;
+    });
+    let pick: SessionClaim | undefined;
+    if (hungry.length === 1) {
+      pick = hungry[0];
+    } else if (hungry.length > 1) {
+      const active = hungry.filter((claim) => activity(claim) > 0);
+      if (active.length === 0) continue;
+      pick = pickMostActive(active);
+    } else {
+      continue;
+    }
+    assigned.set(pick.paneId, session.id);
+    used.add(session.id);
+  }
+
   return diffsFromAssigned(claims, assigned);
 }
 
@@ -79,16 +124,17 @@ function dedupeClaims(claims: SessionClaim[]): SessionAssignment[] {
  *
  * Capture keeps each pane's stored id. A new unclaimed chat is given to the pane
  * that was actually active (PTY input/output), never to "the first pane" just
- * because its file is older. Resume only clears duplicate stored ids so two
- * panes are not launched with the same --resume target.
+ * because its file is older. Resume keeps stored ids (clearing duplicates) and
+ * fills a still-empty pane from discovery so the next spawn can pass --resume.
  */
 export function assignAgentSessions(
   claims: SessionClaim[],
   discovered: DiscoveredSession[],
   mode: AssignMode = "capture",
+  resumeOptions: ResumeAssignOptions = {},
 ): SessionAssignment[] {
   if (claims.length === 0) return [];
-  if (mode === "resume") return dedupeClaims(claims);
+  if (mode === "resume") return assignResumeSessions(claims, discovered, resumeOptions);
 
   const sessions = uniqueById(discovered);
   const byId = new Map(sessions.map((session) => [session.id, session]));
@@ -165,7 +211,17 @@ export async function planCapturedSessions(
       };
     });
     if (mode === "resume") {
-      assignments.push(...assignAgentSessions(claims, [], "resume"));
+      let discovered: DiscoveredSession[] = [];
+      try {
+        discovered = await discover(first.command, first.cwd);
+      } catch {
+        discovered = [];
+      }
+      assignments.push(
+        ...assignAgentSessions(claims, discovered, "resume", {
+          dropMissingStored: resumeHardFails(first.command),
+        }),
+      );
       continue;
     }
     let discovered: DiscoveredSession[] = [];

@@ -2,7 +2,7 @@ import type { AgentPreset, Project, SessionStatus, SpawnOpts, WorkspacePane } fr
 import { DEFAULT_DOCKER_SHELLS, type DockerLaunchInput } from "./dockerLaunch";
 import { paneSessionId } from "./panes";
 import { commandPayload } from "./quickCommands";
-import { resolveAgentCommand, resolvePresetCommand, resumeArgsForSession } from "./agentProtocol";
+import { resolveAgentCommand, resolvePresetCommand, resumeArgsForSession, resumeHardFails } from "./agentProtocol";
 
 export type LaunchMode = "ensure" | "restart";
 
@@ -96,7 +96,7 @@ export function planPaneLaunch(input: {
   const resume = input.resumeOnStart ? resumeArgsForSession(command, input.pane.agent_session_id) : [];
   const spawn: SpawnOpts = { sessionId, cwd, command, args: resume };
   const resumeFallback: SpawnOpts | null =
-    resume.length > 0 ? { sessionId, cwd, command, args: [] } : null;
+    resume.length > 0 && resumeHardFails(command) ? { sessionId, cwd, command, args: [] } : null;
 
   return {
     action: "spawn",

@@ -87,13 +87,14 @@ describe("assignAgentSessions", () => {
     expect(next).toEqual([{ projectId: "proj", paneId: "a1", sessionId: "c" }]);
   });
 
-  it("in resume mode clears a duplicated stored id instead of filling by recency", () => {
+  it("in resume mode clears a duplicated stored id and fills a still-empty pane", () => {
+    const drop = { dropMissingStored: true };
     const split = assignAgentSessions(
       [claim({ paneId: "a1", currentId: "b" }), claim({ paneId: "a2", currentId: "b" })],
       sessions(["b", 20], ["a", 10]),
       "resume",
     );
-    expect(split).toEqual([{ projectId: "proj", paneId: "a2", sessionId: null }]);
+    expect(split).toEqual([{ projectId: "proj", paneId: "a2", sessionId: "a" }]);
 
     expect(
       assignAgentSessions(
@@ -101,12 +102,31 @@ describe("assignAgentSessions", () => {
         sessions(["b", 20], ["a", 10]),
         "resume",
       ),
-    ).toEqual([]);
+    ).toEqual([{ projectId: "proj", paneId: "a2", sessionId: "b" }]);
 
     expect(
       assignAgentSessions(
         [claim({ paneId: "a1", currentId: "a" }), claim({ paneId: "a2", currentId: "b" })],
         sessions(["c", 30], ["b", 20], ["a", 10]),
+        "resume",
+      ),
+    ).toEqual([]);
+
+    expect(
+      assignAgentSessions(
+        [claim({ paneId: "a1", currentId: "gone" })],
+        sessions(["b", 20], ["a", 10]),
+        "resume",
+        drop,
+      ),
+    ).toEqual([{ projectId: "proj", paneId: "a1", sessionId: "b" }]);
+  });
+
+  it("in resume mode keeps a cursor stored id that discovery does not list", () => {
+    expect(
+      assignAgentSessions(
+        [claim({ paneId: "a1", currentId: "gone" })],
+        sessions(["b", 20], ["a", 10]),
         "resume",
       ),
     ).toEqual([]);
@@ -157,5 +177,52 @@ describe("planCapturedSessions", () => {
       { projectId: "proj", paneId: "c2", sessionId: "chat-b" },
       { projectId: "proj", paneId: "x1", sessionId: "codex-1" },
     ]);
+  });
+
+  it("in resume mode still discovers so an empty pane can spawn with --resume", async () => {
+    const calls: string[] = [];
+    const next = await planCapturedSessions(
+      [
+        {
+          projectId: "proj",
+          paneId: "a1",
+          command: "dsh-tui",
+          cwd: "C:\\work",
+          currentSessionId: null,
+        },
+      ],
+      async (command, cwd) => {
+        calls.push(`${command}@${cwd}`);
+        return sessions(["79747403-270f-40fa-acd8-c9024e1f54cd", 50]);
+      },
+      () => ({ lastUserWrite: 0, lastOutput: 0 }),
+      "resume",
+    );
+    expect(calls).toEqual(["dsh-tui@C:\\work"]);
+    expect(next).toEqual([
+      {
+        projectId: "proj",
+        paneId: "a1",
+        sessionId: "79747403-270f-40fa-acd8-c9024e1f54cd",
+      },
+    ]);
+  });
+
+  it("in resume mode keeps a cursor stored id even when discovery lists other chats", async () => {
+    const next = await planCapturedSessions(
+      [
+        {
+          projectId: "proj",
+          paneId: "a1",
+          command: "cursor-agent",
+          cwd: "C:\\work",
+          currentSessionId: "chat-stored",
+        },
+      ],
+      async () => sessions(["other", 50]),
+      () => ({ lastUserWrite: 0, lastOutput: 0 }),
+      "resume",
+    );
+    expect(next).toEqual([]);
   });
 });

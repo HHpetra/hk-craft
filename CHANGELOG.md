@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 同种 Agent 按面板分别恢复会话；终端选中文字复制、Ctrl+Enter 换行。
 - 退出确认一次即可关闭，且不再把空闲 Agent TUI 当成正在运行。
 - 快捷命令栏不再遮挡终端最后一行。
+- 打开项目时扫描 dsh-tui 会话并带 `--resume`；无法加载则回退新会话，避免面板直接退出。
+- Windows 上为嵌入式 xterm.js 注入终端身份，修复 dsh-tui 上下键。
+- cursor-agent 会话恢复不再被 dsh-tui 的失败回退逻辑清掉。
 
 ## [0.2.0] - 2026-09-02
 

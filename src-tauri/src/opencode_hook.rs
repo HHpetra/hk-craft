@@ -206,14 +206,30 @@ pub fn hook_env_vars(
     ])
 }
 
-/// `set "KEY=value" & ` prefixes so ConPTY/cmd.exe still expose hook env to opencode.cmd.
+/// `set KEY=value&` prefixes (no quotes). portable-pty quotes the whole `/c`
+/// argument; nested `set "KEY=value"` becomes `\"` and cmd.exe never assigns.
 pub fn windows_cmd_env_prefix(vars: &[(String, String)]) -> String {
     vars.iter()
         .map(|(key, value)| {
-            let value = value.replace(['"', '&', '|', '%', '<', '>'], "");
-            format!("set \"{key}={value}\" & ")
+            let value = value.replace(['"', '&', '|', '%', '<', '>', ' ', '^'], "");
+            format!("set {key}={value}&")
         })
         .collect()
+}
+
+/// Blank host-terminal identity so a nested `dsh --profile` cannot inherit
+/// Windows Terminal / Cursor `WT_SESSION` or a 1.x `TERM_PROGRAM_VERSION`.
+pub fn windows_cmd_clear_host_terminal_prefix() -> String {
+    [
+        "WT_SESSION",
+        "WT_PROFILE_ID",
+        "WT_DEFAULT_PROFILE",
+        "TERM_PROGRAM_PATH",
+        "TERMINAL_EMULATOR",
+    ]
+    .iter()
+    .map(|key| format!("set {key}=&"))
+    .collect()
 }
 
 pub fn valid_session_id(id: &str) -> bool {
@@ -443,13 +459,21 @@ mod tests {
     }
 
     #[test]
-    fn windows_cmd_prefix_sets_quoted_env() {
+    fn windows_cmd_prefix_sets_unquoted_env() {
         let prefix = windows_cmd_env_prefix(&[
             ("HK_CRAFT_HOOK_PORT".into(), "9".into()),
             ("HK_CRAFT_SESSION".into(), "proj:agent:a1".into()),
         ]);
-        assert!(prefix.contains("set \"HK_CRAFT_HOOK_PORT=9\" & "));
-        assert!(prefix.contains("set \"HK_CRAFT_SESSION=proj:agent:a1\" & "));
+        assert_eq!(prefix, "set HK_CRAFT_HOOK_PORT=9&set HK_CRAFT_SESSION=proj:agent:a1&");
+        assert!(!prefix.contains('"'));
+    }
+
+    #[test]
+    fn windows_cmd_clear_host_terminal_unsets_wt_session() {
+        let prefix = windows_cmd_clear_host_terminal_prefix();
+        assert!(prefix.contains("set WT_SESSION=&"));
+        assert!(prefix.contains("set TERMINAL_EMULATOR=&"));
+        assert!(!prefix.contains('"'));
     }
 
     #[test]

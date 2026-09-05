@@ -2,13 +2,14 @@ import { ptyKill, ptyList } from "./api";
 import {
   PTY_QUIET_MS,
   PTY_QUIET_TIMEOUT_MS,
+  classifyResumeBootOutput,
   quietWaitShouldResolve,
   type PtyWaitResult,
   type PtyWaitStatus,
 } from "./ptyQuiet";
 import { ensurePtyExitListener, ensurePtyOutputListener, subscribePtyExit, subscribePtyOutput } from "./termRegistry";
 
-export { PTY_QUIET_MS, PTY_QUIET_TIMEOUT_MS, quietWaitShouldResolve, shouldInjectPostWrite } from "./ptyQuiet";
+export { PTY_QUIET_MS, PTY_QUIET_TIMEOUT_MS, quietWaitShouldResolve, shouldInjectPostWrite, classifyResumeBootOutput } from "./ptyQuiet";
 export type { PtyWaitResult, PtyWaitStatus } from "./ptyQuiet";
 
 type PendingEvent =
@@ -139,6 +140,51 @@ export async function waitPtySessionGone(sessionId: string, timeoutMs = 4000) {
     if (!ids.includes(sessionId)) return;
     await sleep(50);
   }
+}
+
+/** Watch a just-spawned --resume process: fatal boot → retry bare; painted TUI → keep it. */
+export function waitResumeBootOutcome(
+  sessionId: string,
+  generation: number,
+  timeoutMs = 20000,
+): Promise<"fatal" | "alive"> {
+  return new Promise((resolve) => {
+    let settled = false;
+    let output = "";
+    let unsubOut: (() => void) | undefined;
+    let unsubExit: (() => void) | undefined;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const finish = (value: "fatal" | "alive") => {
+      if (settled) return;
+      settled = true;
+      if (timer != null) window.clearTimeout(timer);
+      unsubOut?.();
+      unsubExit?.();
+      resolve(value);
+    };
+    unsubOut = subscribePtyOutput((id, data, incoming) => {
+      if (id !== sessionId) return;
+      if (!generationMatches(generation, incoming)) return;
+      output += data;
+      const kind = classifyResumeBootOutput(output);
+      if (kind === "fatal") finish("fatal");
+      else if (kind === "alive") finish("alive");
+    });
+    unsubExit = subscribePtyExit((id, incoming) => {
+      if (id !== sessionId) return;
+      if (!generationMatches(generation, incoming)) return;
+      // Died before alt-screen: --resume failed. A later /exit after the TUI
+      // mounted already resolved "alive" above.
+      finish(classifyResumeBootOutput(output) === "alive" ? "alive" : "fatal");
+    });
+    void ensurePtyOutputListener();
+    void ensurePtyExitListener();
+    timer = window.setTimeout(() => {
+      void ptyList().then((ids) => {
+        finish(ids.includes(sessionId) ? "alive" : "fatal");
+      });
+    }, timeoutMs);
+  });
 }
 
 export async function clearPtySession(sessionId: string) {

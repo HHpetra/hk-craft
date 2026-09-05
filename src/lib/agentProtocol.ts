@@ -6,6 +6,8 @@ export type AgentProtocolEntry = {
   bins: string[];
   resume: string;
   discover?: string;
+  /** Agent hard-exits on a missing --resume log. Drop stale ids and retry bare. */
+  resumeFallback?: boolean;
 };
 
 const DEFAULT_COMMAND = "cursor-agent";
@@ -34,6 +36,10 @@ export function resumeArgsForSession(command: string, sessionId: string | null |
   const spec = protocolForCommand(command);
   if (!spec) return [];
   return [spec.resume, sessionId];
+}
+
+export function resumeHardFails(command: string): boolean {
+  return protocolForCommand(command)?.resumeFallback === true;
 }
 
 export function resolvePresetCommand(

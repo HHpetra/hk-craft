@@ -1,6 +1,7 @@
+use std::collections::HashMap;
 use std::fs;
 use std::io::{BufRead, BufReader};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::SystemTime;
 
@@ -290,6 +291,177 @@ fn codex_sessions_dir(home: &Path) -> std::path::PathBuf {
         .join("sessions")
 }
 
+/// DSH JSONL project directory: `--<slug>--` with `/\:` collapsed to `-`.
+pub fn dsh_project_key(cwd: &str) -> String {
+    let mut readable = String::new();
+    let mut separator_run = false;
+    for ch in cwd.chars() {
+        if matches!(ch, '/' | '\\' | ':') {
+            if !separator_run {
+                readable.push('-');
+            }
+            separator_run = true;
+        } else if ch != '~' && (ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-')) {
+            readable.push(ch);
+            separator_run = false;
+        } else {
+            readable.push('~');
+            readable.push_str(&format!("{:04X}", ch as u32));
+            separator_run = false;
+        }
+    }
+    let slug = readable.trim_start_matches('-');
+    let slug = if slug.is_empty() { "root" } else { slug };
+    let slug: String = slug.chars().take(251).collect();
+    format!("--{slug}--")
+}
+
+fn decode_dsh_segment(encoded: &str) -> String {
+    let mut out = String::new();
+    let chars: Vec<char> = encoded.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '~' && i + 4 < chars.len() {
+            let hex: String = chars[i + 1..i + 5].iter().collect();
+            if let Ok(code) = u32::from_str_radix(&hex, 16) {
+                if let Some(ch) = char::from_u32(code) {
+                    out.push(ch);
+                    i += 5;
+                    continue;
+                }
+            }
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    out
+}
+
+fn is_dsh_session_log(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower.starts_with("session") && lower.contains(".jsonl")
+}
+
+fn dsh_session_dir_mtime(dir: &Path) -> Option<u64> {
+    let entries = fs::read_dir(dir).ok()?;
+    let mut newest: Option<u64> = None;
+    for entry in entries.flatten() {
+        if !is_dsh_session_log(&entry.file_name().to_string_lossy()) {
+            continue;
+        }
+        let ms = file_mtime_ms(&entry.path());
+        newest = Some(newest.map_or(ms, |prev| prev.max(ms)));
+    }
+    newest
+}
+
+fn read_dsh_resume_id(path: &Path) -> Option<String> {
+    let raw = fs::read_to_string(path).ok()?;
+    let id = raw.lines().map(str::trim).find(|line| !line.is_empty())?;
+    Some(id.to_string())
+}
+
+fn read_dsh_last_used(path: &Path) -> HashMap<String, u64> {
+    let Ok(raw) = fs::read_to_string(path) else {
+        return HashMap::new();
+    };
+    let Ok(serde_json::Value::Object(map)) = serde_json::from_str(&raw) else {
+        return HashMap::new();
+    };
+    map.into_iter()
+        .filter_map(|(key, value)| {
+            let updated = value
+                .as_u64()
+                .or_else(|| value.as_f64().map(|n| n as u64))?;
+            Some((key, updated))
+        })
+        .collect()
+}
+
+fn dsh_session_roots(home: &Path) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    if let Some(root) = std::env::var_os("DSH_TUI_SESSION_ROOT") {
+        roots.push(PathBuf::from(root));
+    }
+    let dsh_home = std::env::var_os("DSH_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home.join(".dsh"));
+    roots.push(dsh_home.join("sessions"));
+    roots.push(home.join(".dsh-tui").join("sessions"));
+    let mut seen = std::collections::HashSet::new();
+    roots.retain(|path| seen.insert(path.clone()));
+    roots
+}
+
+pub fn discover_dsh_tui(
+    sessions_roots: &[PathBuf],
+    cwd: &str,
+    last_used: &HashMap<String, u64>,
+    resume_id: Option<&str>,
+    resume_updated_ms: u64,
+) -> Vec<DiscoveredSession> {
+    let project = dsh_project_key(cwd);
+    let mut found = Vec::new();
+    for root in sessions_roots {
+        let dir = root.join(&project);
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let encoded = entry.file_name().to_string_lossy().into_owned();
+            if encoded.is_empty() || encoded.starts_with('.') {
+                continue;
+            }
+            let Some(log_ms) = dsh_session_dir_mtime(&path) else {
+                continue;
+            };
+            let id = decode_dsh_segment(&encoded);
+            let is_resume = resume_id == Some(id.as_str());
+            let used = last_used.get(&id).copied();
+            let updated = if is_resume {
+                used.unwrap_or(0).max(resume_updated_ms).max(1)
+            } else if let Some(ms) = used {
+                ms
+            } else if last_used.is_empty() {
+                log_ms
+            } else {
+                continue;
+            };
+            collect_session(&mut found, id, updated);
+        }
+    }
+    sort_sessions(found)
+}
+
+fn discover_dsh_tui_from_home(home: &Path, cwd: &str) -> Vec<DiscoveredSession> {
+    let last_used = read_dsh_last_used(&home.join(".dsh-tui").join("last-used.json"));
+    let resume_path = {
+        let current = home.join(".dsh-tui").join("resume.txt");
+        if current.is_file() {
+            current
+        } else {
+            home.join(".dsh-cc").join("resume.txt")
+        }
+    };
+    let resume_id = read_dsh_resume_id(&resume_path);
+    let resume_updated_ms = if resume_path.is_file() {
+        file_mtime_ms(&resume_path)
+    } else {
+        0
+    };
+    discover_dsh_tui(
+        &dsh_session_roots(home),
+        cwd,
+        &last_used,
+        resume_id.as_deref(),
+        resume_updated_ms,
+    )
+}
+
 pub fn discover_all(command: &str, cwd: &str) -> Vec<DiscoveredSession> {
     let Some(home) = dirs::home_dir() else {
         return Vec::new();
@@ -305,6 +477,7 @@ pub fn discover_all(command: &str, cwd: &str) -> Vec<DiscoveredSession> {
         }
         Some("claude") => discover_claude(&home.join(".claude").join("projects"), cwd),
         Some("codex") => discover_codex(&codex_sessions_dir(&home), cwd),
+        Some("dsh-tui") => discover_dsh_tui_from_home(&home, cwd),
         _ => Vec::new(),
     }
 }
@@ -347,6 +520,8 @@ mod tests {
             Some("cursor")
         );
         assert_eq!(spec_for("codex").and_then(|s| s.discover.clone()).as_deref(), Some("codex"));
+        assert_eq!(spec_for("dsh-tui").and_then(|s| s.discover.clone()).as_deref(), Some("dsh-tui"));
+        assert_eq!(spec_for("dst").and_then(|s| s.discover.clone()).as_deref(), Some("dsh-tui"));
         assert_eq!(spec_for("opencode").and_then(|s| s.discover.clone()), None);
     }
 
@@ -410,5 +585,106 @@ mod tests {
         let found = discover_cursor_chats(&root, r"C:\work\app");
         assert_eq!(ids(&found), vec!["chat-new", "chat-old"]);
         let _ = fs::remove_dir_all(&root);
+    }
+
+    fn write_dsh_session(root: &Path, cwd: &str, id: &str) {
+        let dir = root.join(dsh_project_key(cwd)).join(id);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("session.jsonl.zstd"), id.as_bytes()).unwrap();
+    }
+
+    #[test]
+    fn dsh_project_key_matches_jsonl_layout() {
+        assert_eq!(
+            dsh_project_key(r"C:\Agent\Agent10-WorkTable"),
+            "--C-Agent-Agent10-WorkTable--"
+        );
+        assert_eq!(
+            dsh_project_key("C:/Agent/Agent10-WorkTable"),
+            "--C-Agent-Agent10-WorkTable--"
+        );
+        assert_eq!(decode_dsh_segment("session-1"), "session-1");
+        assert_eq!(decode_dsh_segment("~002E"), ".");
+    }
+
+    #[test]
+    fn dsh_tui_lists_project_sessions_from_last_used_and_resume() {
+        let root = std::env::temp_dir().join(format!("aw-dsh-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        write_dsh_session(&root, r"C:\work\app", "chat-new");
+        write_dsh_session(&root, r"C:\work\app", "chat-old");
+        write_dsh_session(&root, r"C:\work\app", "empty-boot");
+        write_dsh_session(&root, r"C:\work\other", "other");
+        let mut last_used = HashMap::new();
+        last_used.insert("chat-new".into(), 9);
+        last_used.insert("chat-old".into(), 1);
+        last_used.insert("other".into(), 99);
+        let found = discover_dsh_tui(
+            &[root.clone()],
+            r"C:\work\app",
+            &last_used,
+            Some("chat-old"),
+            50,
+        );
+        assert_eq!(ids(&found), vec!["chat-old", "chat-new"]);
+        let resume_only = discover_dsh_tui(
+            &[root.clone()],
+            r"C:\work\app",
+            &last_used,
+            Some("empty-boot"),
+            100,
+        );
+        assert_eq!(ids(&resume_only), vec!["empty-boot", "chat-new", "chat-old"]);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn dsh_tui_falls_back_to_disk_mtime_when_last_used_missing() {
+        let root = std::env::temp_dir().join(format!("aw-dsh-empty-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        write_dsh_session(&root, r"C:\work\app", "chat-a");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        write_dsh_session(&root, r"C:\work\app", "chat-b");
+        let found = discover_dsh_tui(&[root.clone()], r"C:\work\app", &HashMap::new(), None, 0);
+        assert_eq!(ids(&found), vec!["chat-b", "chat-a"]);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn dsh_resume_txt_reads_first_nonempty_line() {
+        let path = std::env::temp_dir().join(format!("aw-dsh-resume-{}.txt", std::process::id()));
+        fs::write(&path, "\n  79747403-270f-40fa-acd8-c9024e1f54cd  \n").unwrap();
+        assert_eq!(
+            read_dsh_resume_id(&path).as_deref(),
+            Some("79747403-270f-40fa-acd8-c9024e1f54cd")
+        );
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn dsh_tui_from_home_reads_resume_txt_and_last_used() {
+        if std::env::var_os("DSH_HOME").is_some() || std::env::var_os("DSH_TUI_SESSION_ROOT").is_some()
+        {
+            return;
+        }
+        let home = std::env::temp_dir().join(format!("aw-dsh-home-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&home);
+        let cwd = r"C:\work\app";
+        let sessions = home.join(".dsh").join("sessions");
+        write_dsh_session(&sessions, cwd, "chat-new");
+        write_dsh_session(&sessions, cwd, "chat-old");
+        write_dsh_session(&sessions, cwd, "empty-boot");
+        fs::create_dir_all(home.join(".dsh-tui")).unwrap();
+        fs::write(
+            home.join(".dsh-tui").join("last-used.json"),
+            r#"{"chat-new":9,"chat-old":1}"#,
+        )
+        .unwrap();
+        fs::write(home.join(".dsh-tui").join("resume.txt"), "chat-old\n").unwrap();
+        let found = discover_dsh_tui_from_home(&home, cwd);
+        assert_eq!(ids(&found).first().copied(), Some("chat-old"));
+        assert!(ids(&found).contains(&"chat-new"));
+        assert!(!ids(&found).contains(&"empty-boot"));
+        let _ = fs::remove_dir_all(&home);
     }
 }

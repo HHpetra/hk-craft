@@ -3,7 +3,7 @@
     { "bins": ["cursor-agent", "agent"], "resume": "--resume", "discover": "cursor" },
     { "bins": ["claude"], "resume": "--resume", "discover": "claude" },
     { "bins": ["codex"], "resume": "resume", "discover": "codex" },
-    { "bins": ["dsh-tui", "dst"], "resume": "--resume" },
+    { "bins": ["dsh-tui", "dst"], "resume": "--resume", "discover": "dsh-tui", "resumeFallback": true },
     { "bins": ["opencode"], "resume": "--session" }
   ]
 }

@@ -30,7 +30,7 @@ import {
   workingProjects,
   type ProjectGroup,
 } from "../lib/projects";
-import { clearPtySession, waitPtyQuiet } from "../lib/ptyWait";
+import { clearPtySession, waitPtyQuiet, waitResumeBootOutcome } from "../lib/ptyWait";
 import { createSerialQueue, resolveQueuedUpdate } from "../lib/serialQueue";
 import { sessionKindLabel } from "../lib/status";
 import { applyDocumentTheme, normalizeTheme } from "../lib/theme";
@@ -314,6 +314,16 @@ async function executeAgentOrRunnerLaunch(
     const result = await spawnPty(plan.spawn);
     markRunning(result.reused);
     persistSeen();
+    if (plan.kind === "agent" && plan.resumeFallback && !result.reused) {
+      const outcome = await waitResumeBootOutcome(plan.sessionId, result.generation);
+      if (outcome === "fatal" && paneStillOpen(get, projectId, paneId)) {
+        persistClearSession();
+        await clearPtySession(plan.sessionId);
+        clearTerminal(plan.sessionId);
+        const second = await spawnPty(plan.resumeFallback);
+        markRunning(second.reused);
+      }
+    }
     return true;
   } catch (err) {
     if (plan.kind === "agent" && plan.resumeFallback) {

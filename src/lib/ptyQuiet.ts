@@ -21,3 +21,19 @@ export function quietWaitShouldResolve(input: {
 export function shouldInjectPostWrite(status: PtyWaitStatus, _output = ""): boolean {
   return status === "quiet" || status === "timeout";
 }
+
+/** dsh-tui throws this and refuses a fresh session when --resume cannot load the log. */
+export function classifyResumeBootOutput(output: string): "fatal" | "alive" | "unknown" {
+  if (
+    /cannot resume session/i.test(output) ||
+    /requires an interactive terminal/i.test(output) ||
+    /drop --resume to start fresh/i.test(output)
+  ) {
+    return "fatal";
+  }
+  // Fullscreen Ink uses alt-screen. Launcher notes can be long; only this means the TUI mounted.
+  if (/\x1b\[\??1049h/i.test(output) || /\x1b\[\??47h/i.test(output)) {
+    return "alive";
+  }
+  return "unknown";
+}
