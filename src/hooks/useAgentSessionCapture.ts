@@ -1,5 +1,8 @@
 import { useEffect } from "react";
+import { confirm } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { activeRunningSessions } from "../lib/panes";
+import { sessionKindLabel } from "../lib/status";
 import { useWorkspace } from "../store/workspace";
 
 const POLL_MS = 2500;
@@ -34,6 +37,16 @@ export function useAgentSessionCapture() {
       .onCloseRequested(async (event) => {
         if (closing) return;
         event.preventDefault();
+        const running = activeRunningSessions(useWorkspace.getState());
+        if (running.length > 0) {
+          await getCurrentWindow().unminimize();
+          const label = running.map((item) => `${item.projectName}·${sessionKindLabel(item.kind)}`).join("、");
+          const ok = await confirm(
+            `还有 ${running.length} 个终端会话正在运行（${label}）。\n退出将终止这些进程，确定退出吗？`,
+            { title: "退出确认", kind: "warning", okLabel: "退出", cancelLabel: "取消" },
+          );
+          if (!ok) return;
+        }
         try {
           await snapshotOpenedSessions();
         } finally {

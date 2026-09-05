@@ -1,4 +1,13 @@
-import type { AgentPreset, PaneKind, Project, WorkspaceLayout, WorkspacePane } from "../types";
+import type {
+  AgentPreset,
+  AppConfig,
+  PaneKind,
+  Project,
+  SessionKind,
+  SessionStatus,
+  WorkspaceLayout,
+  WorkspacePane,
+} from "../types";
 import { sessionId } from "./format";
 import { paneCaps } from "./paneCaps";
 
@@ -48,6 +57,34 @@ export function projectSessionIds(projectId: string, project: Project | undefine
   return terminalPanes(project)
     .map((pane) => paneSessionId(projectId, pane))
     .filter((sid): sid is string => Boolean(sid));
+}
+
+export type ActiveSession = { projectName: string; kind: SessionKind };
+
+export type ActiveSessionSnapshot = {
+  config: AppConfig | null | undefined;
+  openedProjectIds: string[];
+  sessionStatus: Record<string, SessionStatus | undefined>;
+};
+
+function isActiveStatus(status: SessionStatus | undefined) {
+  return status === "running" || status === "waiting";
+}
+
+/** Opened terminal panes whose PTY is still running or waiting (idle / exited / error excluded). */
+export function activeRunningSessions(snapshot: ActiveSessionSnapshot): ActiveSession[] {
+  if (!snapshot.config) return [];
+  const found: ActiveSession[] = [];
+  for (const project of snapshot.config.projects) {
+    if (!snapshot.openedProjectIds.includes(project.id)) continue;
+    for (const pane of terminalPanes(project)) {
+      const sid = paneSessionId(project.id, pane);
+      if (!sid) continue;
+      if (!isActiveStatus(snapshot.sessionStatus[sid])) continue;
+      found.push({ projectName: project.name, kind: pane.kind });
+    }
+  }
+  return found;
 }
 
 export function paneTitle(pane: WorkspacePane, panes: WorkspacePane[], presets: AgentPreset[]) {
