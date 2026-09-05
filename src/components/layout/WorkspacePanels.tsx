@@ -44,7 +44,7 @@ function TerminalHost({
 
   return (
     <div data-drop-session={caps.acceptsPathDrop ? sid : undefined} className="flex h-full w-full flex-col bg-surface-term">
-      <div className="relative min-h-0 flex-1">
+      <div className="relative h-0 min-h-0 flex-1">
         <TerminalPane sessionId={sid} kind={kind} interactive={interactive} />
         {caps.acceptsPathDrop && (
           <div
