@@ -436,8 +436,11 @@ function proposePaneDimensions(entry: RegistryEntry) {
   if (!cell?.width || !cell?.height) return entry.fit.proposeDimensions();
   const scrollbar =
     entry.term.options.scrollback === 0 ? 0 : (core?.viewport?.scrollBarWidth ?? 0);
-  const availW = entry.host.clientWidth - scrollbar;
-  const availH = entry.host.clientHeight;
+  const style = getComputedStyle(entry.host);
+  const padX = (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0);
+  const padY = (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0);
+  const availW = entry.host.clientWidth - scrollbar - padX;
+  const availH = entry.host.clientHeight - padY;
   if (availW < 16 || availH < 16) return undefined;
   return {
     cols: Math.max(2, Math.floor(availW / cell.width)),
