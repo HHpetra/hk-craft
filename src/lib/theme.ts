@@ -24,7 +24,7 @@ export const xtermThemes = {
     brightWhite: "#ebdbb2",
   },
   light: {
-    background: "#f1f1f1",
+    background: "#f5f1ec",
     foreground: "#54433a",
     cursor: "#54433a",
     selectionBackground: "#d9d3ce",
