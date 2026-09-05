@@ -182,15 +182,18 @@ impl PtyManager {
         let history = crate::runner::history_path_for_session(&opts.session_id)
             .ok()
             .flatten();
-        let hook_vars = crate::opencode_hook::prepare_spawn_env(&opts.command, &opts.session_id);
-        let mut cmd = build_command(&opts.command, &opts.args, history.as_deref(), &hook_vars);
+        let extra_env = spawn_extra_env(crate::opencode_hook::prepare_spawn_env(
+            &opts.command,
+            &opts.session_id,
+        ));
+        let mut cmd = build_command(&opts.command, &opts.args, history.as_deref(), &extra_env);
         cmd.cwd(&opts.cwd);
         apply_user_shell_env(&mut cmd);
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
         cmd.env("PYTHONIOENCODING", "utf-8");
         apply_color_theme_env(&mut cmd, theme);
-        for (key, value) in &hook_vars {
+        for (key, value) in &extra_env {
             cmd.env(key, value);
         }
         #[cfg(not(windows))]
@@ -331,10 +334,33 @@ fn apply_color_theme_env(cmd: &mut CommandBuilder, theme: &str) {
     cmd.env("COLORFGBG", if light { "0;15" } else { "15;0" });
 }
 
+/// Match dsh-tui's embedded-xterm.js gate: `TERM_PROGRAM=vscode` and
+/// `TERM_PROGRAM_VERSION` major >= 5 disables ConPTY win32-input-mode
+/// (DECSET 9001). xterm.js 5.x does not emit `CSI Vk;Sc;Uc;Kd;Cs;Rc _`,
+/// so 9001 mangles arrow keys into trailing A/B and breaks menu navigation.
+const EMBEDDED_XTERM_TERM_PROGRAM: &str = "vscode";
+const EMBEDDED_XTERM_TERM_PROGRAM_VERSION: &str = "5.5.0";
+
+fn embedded_xterm_identity() -> Vec<(String, String)> {
+    vec![
+        ("TERM_PROGRAM".into(), EMBEDDED_XTERM_TERM_PROGRAM.into()),
+        (
+            "TERM_PROGRAM_VERSION".into(),
+            EMBEDDED_XTERM_TERM_PROGRAM_VERSION.into(),
+        ),
+    ]
+}
+
+fn spawn_extra_env(hook_vars: Vec<(String, String)>) -> Vec<(String, String)> {
+    let mut vars = embedded_xterm_identity();
+    vars.extend(hook_vars);
+    vars
+}
+
 fn apply_user_shell_env(cmd: &mut CommandBuilder) {
     for (key, _) in std::env::vars_os() {
         if let Some(name) = key.to_str() {
-            if is_activation_env(name) {
+            if is_activation_env(name) || is_host_terminal_env(name) {
                 cmd.env_remove(name);
             }
         }
@@ -353,6 +379,19 @@ fn apply_user_shell_env(cmd: &mut CommandBuilder) {
     if !merged.is_empty() {
         cmd.env("PATH", merged);
     }
+}
+
+fn is_host_terminal_env(name: &str) -> bool {
+    matches!(
+        name.to_ascii_uppercase().as_str(),
+        "WT_SESSION"
+            | "WT_PROFILE_ID"
+            | "WT_DEFAULT_PROFILE"
+            | "TERM_PROGRAM"
+            | "TERM_PROGRAM_VERSION"
+            | "TERM_PROGRAM_PATH"
+            | "TERMINAL_EMULATOR"
+    )
 }
 
 fn is_activation_env(name: &str) -> bool {
@@ -639,6 +678,44 @@ mod tests {
         assert!(is_activation_env("VIRTUAL_ENV"));
         assert!(!is_activation_env("PATH"));
         assert!(!is_activation_env("CONDA_PKGS_DIRS"));
+    }
+
+    #[test]
+    fn strips_inherited_host_terminal_identity() {
+        assert!(is_host_terminal_env("WT_SESSION"));
+        assert!(is_host_terminal_env("wt_profile_id"));
+        assert!(is_host_terminal_env("TERM_PROGRAM"));
+        assert!(is_host_terminal_env("TERM_PROGRAM_VERSION"));
+        assert!(is_host_terminal_env("TERMINAL_EMULATOR"));
+        assert!(!is_host_terminal_env("TERM"));
+        assert!(!is_host_terminal_env("COLORTERM"));
+        assert!(!is_host_terminal_env("PATH"));
+    }
+
+    #[test]
+    fn embedded_xterm_identity_trips_dsh_tui_win32_input_gate() {
+        let id = embedded_xterm_identity();
+        assert_eq!(id[0], ("TERM_PROGRAM".into(), "vscode".into()));
+        assert_eq!(id[1].0, "TERM_PROGRAM_VERSION");
+        let major: u32 = id[1]
+            .1
+            .split('.')
+            .next()
+            .and_then(|part| part.parse().ok())
+            .unwrap_or(0);
+        assert!(major >= 5, "dsh-tui only skips DECSET 9001 when major >= 5");
+    }
+
+    #[test]
+    fn spawn_extra_env_puts_identity_before_hook_vars() {
+        let extra = spawn_extra_env(vec![("HK_CRAFT_SESSION".into(), "p:agent:a1".into())]);
+        assert_eq!(extra[0].0, "TERM_PROGRAM");
+        assert_eq!(extra[1].0, "TERM_PROGRAM_VERSION");
+        assert_eq!(extra[2], ("HK_CRAFT_SESSION".into(), "p:agent:a1".into()));
+        let prefix = crate::opencode_hook::windows_cmd_env_prefix(&extra);
+        assert!(prefix.contains(r#"set "TERM_PROGRAM=vscode" & "#));
+        assert!(prefix.contains(r#"set "TERM_PROGRAM_VERSION=5.5.0" & "#));
+        assert!(prefix.contains(r#"set "HK_CRAFT_SESSION=p:agent:a1" & "#));
     }
 
     #[test]
