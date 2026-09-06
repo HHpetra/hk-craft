@@ -1,9 +1,11 @@
 import { useEffect, useRef } from "react";
+import { copyOnSelectForCommand, resolveAgentCommand } from "../../lib/agentProtocol";
 import { cn, parseSessionId } from "../../lib/format";
 import {
   fitAndResize,
   getOrCreateTerminal,
   scheduleFitAndResize,
+  setSessionCopyOnSelect,
   type RegistryEntry,
 } from "../../lib/termRegistry";
 import type { SessionKind } from "../../types";
@@ -15,6 +17,16 @@ interface TerminalPaneProps {
   sessionId: string;
   kind: SessionKind;
   interactive: boolean;
+}
+
+function copyOnSelectForSession(sessionId: string) {
+  const parsed = parseSessionId(sessionId);
+  if (parsed?.kind !== "agent") return false;
+  const state = useWorkspace.getState();
+  const project = state.config?.projects.find((item) => item.id === parsed.projectId);
+  const pane = project?.panes.find((item) => item.id === parsed.paneId);
+  if (!project || !pane) return false;
+  return copyOnSelectForCommand(resolveAgentCommand(pane, project, state.config?.agent_presets ?? []));
 }
 
 export function TerminalPane({ sessionId, kind, interactive }: TerminalPaneProps) {
@@ -29,6 +41,7 @@ export function TerminalPane({ sessionId, kind, interactive }: TerminalPaneProps
     let ro: ResizeObserver | null = null;
 
     function mount() {
+      setSessionCopyOnSelect(sessionId, copyOnSelectForSession(sessionId));
       const entry: RegistryEntry = getOrCreateTerminal(sessionId);
       if (cancelled || !container) return;
       if (entry.host.parentElement !== container) {

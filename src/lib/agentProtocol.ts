@@ -8,6 +8,8 @@ export type AgentProtocolEntry = {
   discover?: string;
   /** Agent hard-exits on a missing --resume log. Drop stale ids and retry bare. */
   resumeFallback?: boolean;
+  /** Terminal mouse is for xterm selection + copy-on-select, not TUI hits. */
+  copyOnSelect?: boolean;
 };
 
 const DEFAULT_COMMAND = "cursor-agent";
@@ -40,6 +42,10 @@ export function resumeArgsForSession(command: string, sessionId: string | null |
 
 export function resumeHardFails(command: string): boolean {
   return protocolForCommand(command)?.resumeFallback === true;
+}
+
+export function copyOnSelectForCommand(command: string): boolean {
+  return protocolForCommand(command)?.copyOnSelect === true;
 }
 
 export function resolvePresetCommand(

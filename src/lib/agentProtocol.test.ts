@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { AgentPreset, Project, WorkspacePane } from "../types";
 import {
   agentBin,
+  copyOnSelectForCommand,
   liveAgentTargets,
   resolveAgentCommand,
   resumeArgsForSession,
@@ -50,6 +51,10 @@ describe("agent protocol table", () => {
     expect(resumeHardFails("dst")).toBe(true);
     expect(resumeHardFails("cursor-agent")).toBe(false);
     expect(resumeHardFails("opencode")).toBe(false);
+    expect(copyOnSelectForCommand("dsh-tui")).toBe(true);
+    expect(copyOnSelectForCommand("dst")).toBe(true);
+    expect(copyOnSelectForCommand("cursor-agent")).toBe(false);
+    expect(copyOnSelectForCommand("opencode")).toBe(false);
   });
 
   it("falls back to cursor-agent when a pane has no matching preset", () => {

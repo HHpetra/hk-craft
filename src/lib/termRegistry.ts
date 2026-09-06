@@ -8,6 +8,7 @@ import { attachImeAnchor } from "./imeAnchor";
 import { parseSessionId } from "./format";
 import { SESSION_KINDS } from "./paneCaps";
 import { shouldCopySelection } from "./terminalCopy";
+import { createMouseStripper } from "./stripMouseTracking";
 import { hexToOscRgb, normalizeTheme, xtermThemes, type XtermTheme } from "./theme";
 import { primaryTerminalFont, setPreferredTerminalFont, terminalFontFamily } from "./terminalFonts";
 import type { PtyExit, PtyOutput, SessionKind } from "../types";
@@ -60,6 +61,8 @@ const registry = new Map<string, RegistryEntry>();
 const generations = new Map<string, number>();
 const pending = new Map<string, string[]>();
 const closedSessions = new Set<string>();
+const copyOnSelectSessions = new Set<string>();
+const mouseStrippers = new Map<string, (chunk: string) => string>();
 const MAX_PENDING_CHARS = 256_000;
 
 let outputListenPromise: Promise<void> | null = null;
@@ -89,7 +92,30 @@ function flushPending(sessionId: string, term: Terminal) {
   const chunks = pending.get(sessionId);
   if (!chunks?.length) return;
   pending.delete(sessionId);
-  for (const chunk of chunks) term.write(chunk);
+  for (const chunk of chunks) writeTermOutput(sessionId, term, chunk);
+}
+
+export function setSessionCopyOnSelect(sessionId: string, on: boolean) {
+  if (on) {
+    copyOnSelectSessions.add(sessionId);
+    return;
+  }
+  copyOnSelectSessions.delete(sessionId);
+  mouseStrippers.delete(sessionId);
+}
+
+function stripForSession(sessionId: string, data: string) {
+  let strip = mouseStrippers.get(sessionId);
+  if (!strip) {
+    strip = createMouseStripper();
+    mouseStrippers.set(sessionId, strip);
+  }
+  return strip(data);
+}
+
+function writeTermOutput(sessionId: string, term: Terminal, data: string) {
+  const chunk = copyOnSelectSessions.has(sessionId) ? stripForSession(sessionId, data) : data;
+  if (chunk) term.write(chunk);
 }
 
 type FittedSize = { cols: number; rows: number };
@@ -179,7 +205,7 @@ export function ensurePtyOutputListener(): Promise<void> {
     notifyPtyOutput(session_id, data, generation ?? 0);
     const entry = registry.get(session_id);
     if (entry) {
-      entry.term.write(data);
+      writeTermOutput(session_id, entry.term, data);
     } else if (!closedSessions.has(session_id)) {
       bufferOutput(session_id, data);
     }
@@ -333,8 +359,16 @@ function bindTerminalInput(entry: RegistryEntry) {
     event.stopPropagation();
     if (term.hasSelection()) copyTerminalSelection(term, true);
   };
+  const onMouseUp = () => {
+    if (!copyOnSelectSessions.has(entry.sessionId)) return;
+    if (term.hasSelection()) copyTerminalSelection(term, false);
+  };
   host.addEventListener("contextmenu", onContextMenu, true);
-  entry.copyDetach = () => host.removeEventListener("contextmenu", onContextMenu, true);
+  host.addEventListener("mouseup", onMouseUp);
+  entry.copyDetach = () => {
+    host.removeEventListener("contextmenu", onContextMenu, true);
+    host.removeEventListener("mouseup", onMouseUp);
+  };
 
   const textarea = term.textarea;
   if (!textarea) return;
@@ -482,6 +516,7 @@ export function disposeTerminal(sessionId: string) {
   closedSessions.add(sessionId);
   pending.delete(sessionId);
   generations.delete(sessionId);
+  setSessionCopyOnSelect(sessionId, false);
   const timer = fitTimers.get(sessionId);
   if (timer !== undefined) {
     window.clearTimeout(timer);
