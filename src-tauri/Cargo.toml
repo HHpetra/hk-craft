@@ -1,6 +1,6 @@
 [package]
 name = "hk-craft"
-version = "0.3.0"
+version = "0.4.0"
 description = "HK-Craft — A Trinity Desktop Workbench for CLI AI Agents by Hongshan Tech"
 authors = ["Hongshan Tech"]
 license = "MIT"
