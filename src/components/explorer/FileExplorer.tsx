@@ -15,6 +15,14 @@ import {
 import { clearFsClipboard, getFsClipboard, setFsClipboard, subscribeFsClipboard } from "../../lib/fsClipboard";
 import { fileName, isValidFileName, joinDir, parentDir, uniqueName } from "../../lib/fsNames";
 import { beginPathDrag } from "../../lib/dnd";
+import {
+  applyClear,
+  applyClick,
+  applyContextSelect,
+  applySelectAll,
+  emptySelection,
+  type ExplorerSelection,
+} from "../../lib/explorerSelect";
 import { breadcrumbParts, cn, formatAgentInject, formatSize, formatTime, pathsEqual } from "../../lib/format";
 import type { Bookmark, ExplorerView, FileEntry, Project } from "../../types";
 import { useWorkspace } from "../../store/workspace";
@@ -22,11 +30,12 @@ import { ExplorerContextMenu, type ExplorerMenuAction, type ExplorerMenuState } 
 
 type SortKey = "name" | "modified" | "kind" | "size";
 
-function startDrag(event: DragEvent, path: string) {
-  event.dataTransfer.setData("application/x-workbench-path", path);
-  event.dataTransfer.setData("text/plain", path);
+function startDrag(event: DragEvent, path: string, selected: Set<string>, order: string[]) {
+  const paths = selected.has(path) ? order.filter((item) => selected.has(item)) : [path];
+  event.dataTransfer.setData("application/x-workbench-path", paths[0] ?? path);
+  event.dataTransfer.setData("text/plain", paths.join("\n"));
   event.dataTransfer.effectAllowed = "copy";
-  beginPathDrag([path]);
+  beginPathDrag(paths);
 }
 
 function RenameField({
@@ -45,7 +54,7 @@ function RenameField({
     <input
       autoFocus
       value={draft}
-      className="min-w-0 flex-1 rounded border border-line bg-field px-1 py-0.5 text-ink outline-none"
+      className="min-w-0 flex-1 rounded border border-line bg-field px-1 py-0.5 text-ink outline-none select-text"
       onChange={(event) => setDraft(event.target.value)}
       onFocus={(event) => event.target.select()}
       onClick={(event) => event.stopPropagation()}
@@ -86,7 +95,8 @@ export function FileExplorer({ project }: { project: Project }) {
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [sortAsc, setSortAsc] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selection, setSelection] = useState<ExplorerSelection>(emptySelection);
+  const [focus, setFocus] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [menu, setMenu] = useState<ExplorerMenuState | null>(null);
   const [clip, setClip] = useState(getFsClipboard);
@@ -123,7 +133,8 @@ export function FileExplorer({ project }: { project: Project }) {
   }, [current]);
 
   useEffect(() => {
-    setSelected(null);
+    setSelection(emptySelection());
+    setFocus(null);
     setRenaming(null);
     setMenu(null);
     void reload();
@@ -153,8 +164,23 @@ export function FileExplorer({ project }: { project: Project }) {
     return filtered;
   }, [entries, filter, sortKey, sortAsc]);
 
-  const selectedEntry = entries.find((entry) => entry.path === selected) ?? null;
-  const canPaste = Boolean(clip);
+  const visiblePaths = useMemo(() => visible.map((entry) => entry.path), [visible]);
+  const selectedEntries = visible.filter((entry) => selection.selected.has(entry.path));
+  const focusEntry =
+    (focus && selection.selected.has(focus) ? entries.find((entry) => entry.path === focus) : null) ??
+    selectedEntries[0] ??
+    null;
+  const canPaste = Boolean(clip?.items.length);
+
+  function setSolo(path: string | null) {
+    if (!path) {
+      setSelection(emptySelection());
+      setFocus(null);
+      return;
+    }
+    setSelection({ selected: new Set([path]), anchor: path });
+    setFocus(path);
+  }
 
   function toggleSort(key: SortKey) {
     if (sortKey === key) setSortAsc((v) => !v);
@@ -182,15 +208,22 @@ export function FileExplorer({ project }: { project: Project }) {
     void fsOpen(entry.path).catch((err) => setNotice(String(err)));
   }
 
-  function copyClip(mode: "copy" | "cut", entry = selectedEntry) {
-    if (!entry) return;
-    setFsClipboard({ mode, path: entry.path, name: entry.name, isDir: entry.is_dir });
+  function copyClip(mode: "copy" | "cut", items = selectedEntries) {
+    if (!items.length) return;
+    setFsClipboard({
+      mode,
+      items: items.map((entry) => ({
+        path: entry.path,
+        name: entry.name,
+        isDir: entry.is_dir,
+      })),
+    });
   }
 
-  async function copyText(path: string | null) {
-    if (!path) return;
+  async function copyText(text: string | null) {
+    if (!text) return;
     try {
-      await clipboardWriteText(path);
+      await clipboardWriteText(text);
     } catch (err) {
       setNotice(String(err));
     }
@@ -198,35 +231,57 @@ export function FileExplorer({ project }: { project: Project }) {
 
   async function pasteHere() {
     const item = getFsClipboard();
-    if (!item) return;
-    if (item.mode === "cut" && pathsEqual(parentDir(item.path), current)) return;
-    const destName = uniqueName(
-      item.name,
-      entries.map((entry) => entry.name),
-      item.isDir,
-    );
-    const dest = joinDir(current, destName);
-    try {
-      const path = item.mode === "cut" ? await fsMove(item.path, dest) : await fsCopy(item.path, dest);
-      if (item.mode === "cut") clearFsClipboard();
-      await reload();
-      setSelected(path);
-    } catch (err) {
-      setNotice(String(err));
+    if (!item?.items.length) return;
+    const used = entries.map((entry) => entry.name);
+    const pasted: string[] = [];
+    let failed = false;
+    for (const clipItem of item.items) {
+      if (item.mode === "cut" && pathsEqual(parentDir(clipItem.path), current)) continue;
+      const destName = uniqueName(clipItem.name, used, clipItem.isDir);
+      used.push(destName);
+      const dest = joinDir(current, destName);
+      try {
+        const path = item.mode === "cut" ? await fsMove(clipItem.path, dest) : await fsCopy(clipItem.path, dest);
+        pasted.push(path);
+      } catch (err) {
+        setNotice(String(err));
+        failed = true;
+        break;
+      }
     }
+    if (!pasted.length) return;
+    if (item.mode === "cut" && !failed) clearFsClipboard();
+    await reload();
+    setSelection({ selected: new Set(pasted), anchor: pasted[0] });
+    setFocus(pasted[pasted.length - 1]);
   }
 
-  async function removeEntry(entry = selectedEntry) {
-    if (!entry || renaming) return;
-    const kind = entry.is_dir ? "文件夹" : "文件";
-    if (!window.confirm(`删除${kind}「${entry.name}」？此操作无法撤销。`)) return;
+  async function removeEntry(items = selectedEntries) {
+    if (!items.length || renaming) return;
+    const message =
+      items.length === 1
+        ? `删除${items[0].is_dir ? "文件夹" : "文件"}「${items[0].name}」？此操作无法撤销。`
+        : `删除 ${items.length} 项？此操作无法撤销。`;
+    if (!window.confirm(message)) return;
     try {
-      await fsDelete(entry.path);
-      if (clip && pathsEqual(clip.path, entry.path)) clearFsClipboard();
-      setSelected(null);
+      for (const entry of items) {
+        await fsDelete(entry.path);
+      }
+      const clipNow = getFsClipboard();
+      if (clipNow) {
+        const remaining = clipNow.items.filter(
+          (clipItem) => !items.some((entry) => pathsEqual(clipItem.path, entry.path)),
+        );
+        if (remaining.length !== clipNow.items.length) {
+          if (!remaining.length) clearFsClipboard();
+          else setFsClipboard({ ...clipNow, items: remaining });
+        }
+      }
+      setSolo(null);
       await reload();
     } catch (err) {
       setNotice(String(err));
+      await reload();
     }
   }
 
@@ -241,7 +296,7 @@ export function FileExplorer({ project }: { project: Project }) {
     try {
       const renamed = await fsRename(path, trimmed);
       await reload();
-      setSelected(renamed);
+      setSolo(renamed);
     } catch (err) {
       setNotice(String(err));
     }
@@ -256,7 +311,7 @@ export function FileExplorer({ project }: { project: Project }) {
     try {
       const path = await fsCreate(current, name, isDir);
       await reload();
-      setSelected(path);
+      setSolo(path);
       setRenaming(path);
     } catch (err) {
       setNotice(String(err));
@@ -264,7 +319,7 @@ export function FileExplorer({ project }: { project: Project }) {
   }
 
   async function onMenuAction(action: ExplorerMenuAction) {
-    const entry = selectedEntry;
+    const entry = focusEntry;
     switch (action) {
       case "open":
         if (entry) openEntry(entry);
@@ -273,25 +328,27 @@ export function FileExplorer({ project }: { project: Project }) {
         if (entry) void fsReveal(entry.path).catch((err) => setNotice(String(err)));
         break;
       case "copy":
-        copyClip("copy", entry);
+        copyClip("copy");
         break;
       case "cut":
-        copyClip("cut", entry);
+        copyClip("cut");
         break;
       case "paste":
         await pasteHere();
         break;
       case "copyPath":
-        await copyText(entry?.path ?? null);
+        await copyText(selectedEntries.map((item) => item.path).join("\n") || null);
         break;
       case "copyAgentRef":
-        if (entry) await copyText(formatAgentInject(entry.path, agentPrefix).trimEnd());
+        await copyText(
+          selectedEntries.map((item) => formatAgentInject(item.path, agentPrefix).trimEnd()).join("\n") || null,
+        );
         break;
       case "rename":
         if (entry) setRenaming(entry.path);
         break;
       case "delete":
-        await removeEntry(entry);
+        await removeEntry();
         break;
       case "newFile":
         await createItem(false);
@@ -315,7 +372,7 @@ export function FileExplorer({ project }: { project: Project }) {
     if (target?.tagName === "INPUT" || target?.tagName === "TEXTAREA") return;
     if (event.key === "F2") {
       event.preventDefault();
-      if (selected) setRenaming(selected);
+      if (focus && selection.selected.has(focus)) setRenaming(focus);
       return;
     }
     if (event.key === "Delete") {
@@ -326,10 +383,17 @@ export function FileExplorer({ project }: { project: Project }) {
     const ctrl = event.ctrlKey || event.metaKey;
     if (!ctrl || event.altKey) return;
     const key = event.key.toLowerCase();
+    if (key === "a") {
+      event.preventDefault();
+      setSelection(applySelectAll(visiblePaths));
+      setFocus(visible[0]?.path ?? null);
+      return;
+    }
     if (key === "c") {
       event.preventDefault();
-      if (event.shiftKey) void copyText(selected ?? current);
-      else copyClip("copy");
+      if (event.shiftKey) {
+        void copyText(selectedEntries.map((item) => item.path).join("\n") || current);
+      } else copyClip("copy");
       return;
     }
     if (event.shiftKey) return;
@@ -348,7 +412,8 @@ export function FileExplorer({ project }: { project: Project }) {
     event.preventDefault();
     event.stopPropagation();
     focusPane();
-    setSelected(entry.path);
+    setSelection(applyContextSelect(selection, entry.path));
+    setFocus(entry.path);
     setMenu({ x: event.clientX, y: event.clientY, kind: "entry" });
   }
 
@@ -356,8 +421,20 @@ export function FileExplorer({ project }: { project: Project }) {
     if ((event.target as HTMLElement | null)?.closest("[data-entry]")) return;
     event.preventDefault();
     focusPane();
-    setSelected(null);
+    setSelection(applyClear());
+    setFocus(null);
     setMenu({ x: event.clientX, y: event.clientY, kind: "blank" });
+  }
+
+  function onEntryClick(event: MouseEvent, entry: FileEntry) {
+    focusPane();
+    setSelection(
+      applyClick(selection, visiblePaths, entry.path, {
+        ctrl: event.ctrlKey || event.metaKey,
+        shift: event.shiftKey,
+      }),
+    );
+    setFocus(entry.path);
   }
 
   function renderName(entry: FileEntry, extra?: ReactNode) {
@@ -471,11 +548,14 @@ export function FileExplorer({ project }: { project: Project }) {
         <div
           ref={paneRef}
           tabIndex={0}
-          className="min-h-0 flex-1 overflow-auto outline-none"
+          className="min-h-0 flex-1 overflow-auto outline-none select-none"
           onMouseDown={(event) => {
             if ((event.target as HTMLElement | null)?.closest("[data-entry]")) return;
             focusPane();
-            if (event.button === 0) setSelected(null);
+            if (event.button === 0) {
+              setSelection(applyClear());
+              setFocus(null);
+            }
           }}
           onContextMenu={onBlankContext}
           onKeyDown={onPaneKeyDown}
@@ -489,16 +569,13 @@ export function FileExplorer({ project }: { project: Project }) {
                   tabIndex={-1}
                   data-entry=""
                   draggable={renaming !== entry.path}
-                  onDragStart={(e) => startDrag(e, entry.path)}
-                  onClick={() => {
-                    focusPane();
-                    setSelected(entry.path);
-                  }}
+                  onDragStart={(e) => startDrag(e, entry.path, selection.selected, visiblePaths)}
+                  onClick={(event) => onEntryClick(event, entry)}
                   onDoubleClick={() => openEntry(entry)}
                   onContextMenu={(event) => onEntryContext(event, entry)}
                   className={cn(
                     "flex flex-col items-center gap-1 rounded-md px-1 py-2 text-ink-muted hover:bg-hover hover:text-ink",
-                    selected === entry.path && "bg-active text-ink",
+                    selection.selected.has(entry.path) && "bg-active text-ink",
                   )}
                   title={entry.name}
                 >
@@ -550,16 +627,13 @@ export function FileExplorer({ project }: { project: Project }) {
                     key={entry.path}
                     data-entry=""
                     draggable={renaming !== entry.path}
-                    onDragStart={(e) => startDrag(e, entry.path)}
-                    onClick={() => {
-                      focusPane();
-                      setSelected(entry.path);
-                    }}
+                    onDragStart={(e) => startDrag(e, entry.path, selection.selected, visiblePaths)}
+                    onClick={(event) => onEntryClick(event, entry)}
                     onDoubleClick={() => openEntry(entry)}
                     onContextMenu={(event) => onEntryContext(event, entry)}
                     className={cn(
                       "h-8 cursor-default border-t border-line text-ink hover:bg-hover",
-                      selected === entry.path && "bg-active",
+                      selection.selected.has(entry.path) && "bg-active",
                     )}
                   >
                     <td className="overflow-hidden whitespace-nowrap px-3 py-1.5">

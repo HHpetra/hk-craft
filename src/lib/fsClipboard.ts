@@ -1,10 +1,14 @@
 export type FsClipMode = "copy" | "cut";
 
-export type FsClipboard = {
-  mode: FsClipMode;
+export type FsClipboardItem = {
   path: string;
   name: string;
   isDir: boolean;
+};
+
+export type FsClipboard = {
+  mode: FsClipMode;
+  items: FsClipboardItem[];
 };
 
 type Listener = (clip: FsClipboard | null) => void;
@@ -21,7 +25,7 @@ export function getFsClipboard() {
 }
 
 export function setFsClipboard(next: FsClipboard | null) {
-  current = next;
+  current = next && next.items.length ? next : null;
   emit();
 }
 
