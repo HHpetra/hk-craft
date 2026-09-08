@@ -7,16 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [0.5.0] - 2026-09-08
-
-### Added
-- 设置中可按项目查看各终端进程树的内存与 CPU 占用。
-- Agent 面板注入 `HK_CRAFT_KIND=agent`，便于 Starship 等工具在 Agent 子 shell 中跳过初始化。
-
-## [0.4.0] - 2026-09-06
+## [0.4.0] - 2026-09-08
 
 ### Added
 - 文件资源管理器支持 Ctrl/Shift 多选，可批量复制、剪切、删除与拖拽注入。
+- 设置中可按项目查看各终端进程树的内存与 CPU 占用。
+- Agent 面板注入 `HK_CRAFT_KIND=agent`，便于 Starship 等工具在 Agent 子 shell 中跳过初始化。
 
 ### Fixed
 - dsh-tui 面板拖选文字不再误开 TUI 文字层，松手即复制；其它 Agent 鼠标逻辑不变。
