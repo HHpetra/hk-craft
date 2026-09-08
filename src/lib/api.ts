@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { notePtyUserInput } from "./ptyActivity";
-import type { AppConfig, DockerContainer, FileEntry, SpawnOpts, SpawnResult } from "../types";
+import type { AppConfig, DockerContainer, FileEntry, PtySessionStat, SpawnOpts, SpawnResult } from "../types";
 
 export function loadConfig() {
   return invoke<AppConfig>("load_config");
@@ -95,6 +95,10 @@ export function ptyKill(sessionId: string) {
 
 export function ptyList() {
   return invoke<string[]>("pty_list");
+}
+
+export function ptySessionStats() {
+  return invoke<PtySessionStat[]>("pty_session_stats");
 }
 
 export function discoverAgentSessions(command: string, cwd: string) {

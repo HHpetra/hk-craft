@@ -12,6 +12,8 @@ use tauri::{AppHandle, Emitter, State};
 use crate::error::{AppError, AppResult};
 use crate::AppState;
 
+mod stats;
+
 #[derive(Serialize, Clone)]
 pub struct PtyOutput {
     pub session_id: String,
@@ -137,6 +139,16 @@ impl PtyManager {
         self.sessions.lock().expect("pty lock").keys().cloned().collect()
     }
 
+    pub fn pids(&self) -> Vec<(String, u32)> {
+        let map = self.sessions.lock().expect("pty lock");
+        map.iter()
+            .filter_map(|(id, session)| {
+                let child = session.child.lock().expect("child lock");
+                child.process_id().map(|pid| (id.clone(), pid))
+            })
+            .collect()
+    }
+
     pub fn spawn(&self, app: AppHandle, opts: SpawnOpts, theme: &str) -> AppResult<SpawnResult> {
         loop {
             {
@@ -182,10 +194,10 @@ impl PtyManager {
         let history = crate::runner::history_path_for_session(&opts.session_id)
             .ok()
             .flatten();
-        let extra_env = spawn_extra_env(crate::opencode_hook::prepare_spawn_env(
-            &opts.command,
+        let extra_env = spawn_extra_env(
             &opts.session_id,
-        ));
+            crate::opencode_hook::prepare_spawn_env(&opts.command, &opts.session_id),
+        );
         let mut cmd = build_command(&opts.command, &opts.args, history.as_deref(), &extra_env);
         cmd.cwd(&opts.cwd);
         apply_user_shell_env(&mut cmd);
@@ -351,8 +363,23 @@ fn embedded_xterm_identity() -> Vec<(String, String)> {
     ]
 }
 
-fn spawn_extra_env(hook_vars: Vec<(String, String)>) -> Vec<(String, String)> {
+/// Pane kind for child shells (Starship etc. can skip init when this is `agent`).
+const HK_CRAFT_KIND: &str = "HK_CRAFT_KIND";
+
+fn session_kind_env(session_id: &str) -> Option<&'static str> {
+    match crate::runner::parse_session_id(session_id) {
+        Some((_, "agent", _)) => Some("agent"),
+        Some((_, "runner", _)) => Some("runner"),
+        Some((_, "docker", _)) => Some("docker"),
+        _ => None,
+    }
+}
+
+fn spawn_extra_env(session_id: &str, hook_vars: Vec<(String, String)>) -> Vec<(String, String)> {
     let mut vars = embedded_xterm_identity();
+    if let Some(kind) = session_kind_env(session_id) {
+        vars.push((HK_CRAFT_KIND.into(), kind.into()));
+    }
     vars.extend(hook_vars);
     vars
 }
@@ -366,6 +393,7 @@ fn apply_user_shell_env(cmd: &mut CommandBuilder) {
         "TERM_PROGRAM_VERSION",
         "TERM_PROGRAM_PATH",
         "TERMINAL_EMULATOR",
+        HK_CRAFT_KIND,
     ] {
         cmd.env_remove(name);
     }
@@ -657,6 +685,11 @@ pub fn pty_list(state: State<'_, AppState>) -> Vec<String> {
     state.pty.list()
 }
 
+#[tauri::command]
+pub fn pty_session_stats(state: State<'_, AppState>) -> Vec<stats::PtySessionStat> {
+    stats::sample_sessions(&state.pty.pids())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -725,23 +758,42 @@ mod tests {
 
     #[test]
     fn spawn_extra_env_puts_identity_before_hook_vars() {
-        let extra = spawn_extra_env(vec![("HK_CRAFT_SESSION".into(), "p:agent:a1".into())]);
+        let extra = spawn_extra_env(
+            "p:agent:a1",
+            vec![("HK_CRAFT_SESSION".into(), "p:agent:a1".into())],
+        );
         assert_eq!(extra[0].0, "TERM_PROGRAM");
         assert_eq!(extra[1].0, "TERM_PROGRAM_VERSION");
-        assert_eq!(extra[2], ("HK_CRAFT_SESSION".into(), "p:agent:a1".into()));
+        assert_eq!(extra[2], (HK_CRAFT_KIND.into(), "agent".into()));
+        assert_eq!(extra[3], ("HK_CRAFT_SESSION".into(), "p:agent:a1".into()));
         let prefix = crate::opencode_hook::windows_cmd_env_prefix(&extra);
         assert!(prefix.contains("set TERM_PROGRAM=vscode&"));
         assert!(prefix.contains("set TERM_PROGRAM_VERSION=5.5.0&"));
+        assert!(prefix.contains("set HK_CRAFT_KIND=agent&"));
         assert!(prefix.contains("set HK_CRAFT_SESSION=p:agent:a1&"));
         assert!(!prefix.contains('"'));
     }
 
     #[test]
+    fn spawn_extra_env_sets_kind_from_session() {
+        let agent = spawn_extra_env("p:agent:a1", Vec::new());
+        assert!(agent.iter().any(|(k, v)| k == HK_CRAFT_KIND && v == "agent"));
+        let runner = spawn_extra_env("p:runner:r1", Vec::new());
+        assert!(runner.iter().any(|(k, v)| k == HK_CRAFT_KIND && v == "runner"));
+        let docker = spawn_extra_env("p:docker:d1", Vec::new());
+        assert!(docker.iter().any(|(k, v)| k == HK_CRAFT_KIND && v == "docker"));
+        let unknown = spawn_extra_env("bad", Vec::new());
+        assert!(!unknown.iter().any(|(k, _)| k == HK_CRAFT_KIND));
+    }
+
+    #[test]
     fn windows_cmd_spawn_line_clears_host_identity_then_sets_vscode() {
-        let extra = spawn_extra_env(Vec::new());
+        let extra = spawn_extra_env("p:agent:a1", Vec::new());
         let line = windows_cmd_spawn_line("dsh-tui", &["--resume".into(), "chat-1".into()], &extra);
         assert!(line.starts_with("chcp 65001 >nul&set WT_SESSION=&"));
-        assert!(line.contains("set TERM_PROGRAM=vscode&set TERM_PROGRAM_VERSION=5.5.0&dsh-tui --resume chat-1"));
+        assert!(line.contains(
+            "set TERM_PROGRAM=vscode&set TERM_PROGRAM_VERSION=5.5.0&set HK_CRAFT_KIND=agent&dsh-tui --resume chat-1"
+        ));
         let set_region = line.split("dsh-tui").next().unwrap();
         assert!(
             !set_region.contains('"'),

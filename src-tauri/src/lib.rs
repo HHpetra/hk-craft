@@ -66,6 +66,7 @@ pub fn run() {
             pty::pty_resize,
             pty::pty_kill,
             pty::pty_list,
+            pty::pty_session_stats,
             docker::docker_list_containers,
             docker::docker_ensure_running,
             session::discover_agent_sessions,

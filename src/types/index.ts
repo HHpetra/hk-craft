@@ -100,6 +100,14 @@ export interface SpawnResult {
   generation: number;
 }
 
+export interface PtySessionStat {
+  session_id: string;
+  pid: number;
+  memory_bytes: number;
+  cpu_pct: number;
+  process_count: number;
+}
+
 export interface PtyOutput {
   session_id: string;
   data: string;

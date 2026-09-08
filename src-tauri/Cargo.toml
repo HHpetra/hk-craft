@@ -1,6 +1,6 @@
 [package]
 name = "hk-craft"
-version = "0.4.0"
+version = "0.5.0"
 description = "HK-Craft — A Trinity Desktop Workbench for CLI AI Agents by Hongshan Tech"
 authors = ["Hongshan Tech"]
 license = "MIT"
@@ -22,6 +22,7 @@ thiserror = "2"
 dirs = "6"
 dunce = "1"
 portable-pty = "0.8"
+sysinfo = "0.36"
 arboard = { version = "3", default-features = false }
 encoding_rs = "0.8"
 anyhow = "1"

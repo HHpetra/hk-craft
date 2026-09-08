@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { FolderOpen, Plus, Trash2, X } from "lucide-react";
 import type { AgentPreset, Bookmark } from "../../types";
 import { openUrl } from "../../lib/api";
+import { SessionStatsOverlay } from "./SessionStatsOverlay";
 import {
   APP_COPYRIGHT,
   APP_GIT_HASH,
@@ -32,9 +33,13 @@ export function SettingsDialog() {
   const [bookmarkPath, setBookmarkPath] = useState("");
   const [nerdFonts, setNerdFonts] = useState<string[]>(() => listDetectedNerdFonts());
   const [update, setUpdate] = useState<UpdateCheck | { status: "checking" }>({ status: "checking" });
+  const [statsOpen, setStatsOpen] = useState(false);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      setStatsOpen(false);
+      return;
+    }
     setUpdate({ status: "checking" });
     void checkAppUpdate().then(setUpdate);
     const current = useWorkspace.getState().config;
@@ -50,11 +55,16 @@ export function SettingsDialog() {
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key !== "Escape") return;
+      if (statsOpen) {
+        setStatsOpen(false);
+        return;
+      }
+      setOpen(false);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, setOpen]);
+  }, [open, setOpen, statsOpen]);
 
   if (!open || !config) return null;
 
@@ -178,6 +188,18 @@ export function SettingsDialog() {
           <p className="mt-1.5 text-[11px] text-ink-subtle">
             每个 Agent 面板会记住当前会话 ID，下次用 --resume / --session 精确接上。多个面板互不影响。终端画面不会恢复。
           </p>
+        </section>
+
+        <section className="mb-5">
+          <div className="mb-2 text-[11px] font-medium uppercase tracking-wider text-ink-subtle">终端资源</div>
+          <button
+            type="button"
+            className="rounded-md bg-field px-3 py-1.5 text-[12px] text-ink hover:bg-hover"
+            onClick={() => setStatsOpen(true)}
+          >
+            查看占用
+          </button>
+          <p className="mt-1.5 text-[11px] text-ink-subtle">按项目查看当前终端进程树的内存与 CPU，不含应用自身。</p>
         </section>
 
         <section className="mb-5">
@@ -400,6 +422,7 @@ export function SettingsDialog() {
           </footer>
         </div>
       </div>
+      <SessionStatsOverlay open={statsOpen} onClose={() => setStatsOpen(false)} />
     </div>
   );
 }
