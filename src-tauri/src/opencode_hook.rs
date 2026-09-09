@@ -1,9 +1,10 @@
-//! OpenCode session identity via a global plugin, not sqlite discovery.
+//! OpenCode live session identity via a global plugin.
 //!
 //! HK-Craft writes `plugins/hk-craft.js` into OpenCode's config dir. When a PTY
 //! spawns `opencode`, it injects localhost hook env vars; the plugin reports the
 //! top-level session id over TCP and a JSON inbox file. Other terminals are inert
-//! because they lack those variables.
+//! because they lack those variables. Historical sessions for a project cwd are
+//! listed separately by `opencode_discover` from `opencode.db`.
 
 use std::fs;
 use std::io::{BufRead, BufReader, Write};

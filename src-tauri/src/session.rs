@@ -478,6 +478,7 @@ pub fn discover_all(command: &str, cwd: &str) -> Vec<DiscoveredSession> {
         Some("claude") => discover_claude(&home.join(".claude").join("projects"), cwd),
         Some("codex") => discover_codex(&codex_sessions_dir(&home), cwd),
         Some("dsh-tui") => discover_dsh_tui_from_home(&home, cwd),
+        Some("opencode") => crate::opencode_discover::discover_opencode(cwd),
         _ => Vec::new(),
     }
 }
@@ -522,7 +523,10 @@ mod tests {
         assert_eq!(spec_for("codex").and_then(|s| s.discover.clone()).as_deref(), Some("codex"));
         assert_eq!(spec_for("dsh-tui").and_then(|s| s.discover.clone()).as_deref(), Some("dsh-tui"));
         assert_eq!(spec_for("dst").and_then(|s| s.discover.clone()).as_deref(), Some("dsh-tui"));
-        assert_eq!(spec_for("opencode").and_then(|s| s.discover.clone()), None);
+        assert_eq!(
+            spec_for("opencode").and_then(|s| s.discover.clone()).as_deref(),
+            Some("opencode")
+        );
     }
 
     fn ids(sessions: &[DiscoveredSession]) -> Vec<&str> {

@@ -3,6 +3,7 @@ mod config;
 mod docker;
 mod error;
 mod fs;
+mod opencode_discover;
 mod opencode_hook;
 mod pty;
 mod runner;
