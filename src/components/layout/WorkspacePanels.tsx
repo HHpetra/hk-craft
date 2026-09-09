@@ -74,7 +74,7 @@ function PaneBody({
   interactive: boolean;
 }) {
   if (pane.kind === "explorer") {
-    return <FileExplorer key={pane.id} project={project} />;
+    return <FileExplorer key={pane.id} project={project} paneId={pane.id} />;
   }
   return (
     <TerminalHost

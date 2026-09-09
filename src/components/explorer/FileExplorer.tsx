@@ -15,6 +15,7 @@ import {
 import { clearFsClipboard, getFsClipboard, setFsClipboard, subscribeFsClipboard } from "../../lib/fsClipboard";
 import { fileName, isValidFileName, joinDir, parentDir, uniqueName } from "../../lib/fsNames";
 import { beginPathDrag } from "../../lib/dnd";
+import { deleteConfirmCopy } from "../../lib/explorerDelete";
 import {
   applyClear,
   applyClick,
@@ -26,9 +27,20 @@ import {
 import { breadcrumbParts, cn, formatAgentInject, formatSize, formatTime, pathsEqual } from "../../lib/format";
 import type { Bookmark, ExplorerView, FileEntry, Project } from "../../types";
 import { useWorkspace } from "../../store/workspace";
+import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { ExplorerContextMenu, type ExplorerMenuAction, type ExplorerMenuState } from "./ExplorerContextMenu";
 
 type SortKey = "name" | "modified" | "kind" | "size";
+
+function isTypingTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return false;
+  return (
+    target.tagName === "INPUT" ||
+    target.tagName === "TEXTAREA" ||
+    target.tagName === "SELECT" ||
+    target.isContentEditable
+  );
+}
 
 function startDrag(event: DragEvent, path: string, selected: Set<string>, order: string[]) {
   const paths = selected.has(path) ? order.filter((item) => selected.has(item)) : [path];
@@ -79,7 +91,7 @@ function RenameField({
   );
 }
 
-export function FileExplorer({ project }: { project: Project }) {
+export function FileExplorer({ project, paneId }: { project: Project; paneId: string }) {
   const bookmarks = useWorkspace((s) => s.config?.bookmarks ?? []);
   const presets = useWorkspace((s) => s.config?.agent_presets ?? []);
   const explorerView = (useWorkspace((s) => s.config?.settings.explorer_view) === "icons"
@@ -99,8 +111,11 @@ export function FileExplorer({ project }: { project: Project }) {
   const [focus, setFocus] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [menu, setMenu] = useState<ExplorerMenuState | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<FileEntry[] | null>(null);
   const [clip, setClip] = useState(getFsClipboard);
   const paneRef = useRef<HTMLDivElement>(null);
+  const requestRemoveRef = useRef<(items?: FileEntry[]) => void>(() => undefined);
+  const deleteBlockedRef = useRef(false);
 
   const agentPrefix = presets.find((preset) => preset.id === project.agent_preset)?.drag_prefix ?? "@";
 
@@ -137,6 +152,7 @@ export function FileExplorer({ project }: { project: Project }) {
     setFocus(null);
     setRenaming(null);
     setMenu(null);
+    setPendingDelete(null);
     void reload();
   }, [reload]);
 
@@ -171,6 +187,7 @@ export function FileExplorer({ project }: { project: Project }) {
     selectedEntries[0] ??
     null;
   const canPaste = Boolean(clip?.items.length);
+  const deleteCopy = pendingDelete ? deleteConfirmCopy(pendingDelete) : null;
 
   function setSolo(path: string | null) {
     if (!path) {
@@ -256,13 +273,32 @@ export function FileExplorer({ project }: { project: Project }) {
     setFocus(pasted[pasted.length - 1]);
   }
 
-  async function removeEntry(items = selectedEntries) {
+  function requestRemove(items = selectedEntries) {
     if (!items.length || renaming) return;
-    const message =
-      items.length === 1
-        ? `删除${items[0].is_dir ? "文件夹" : "文件"}「${items[0].name}」？此操作无法撤销。`
-        : `删除 ${items.length} 项？此操作无法撤销。`;
-    if (!window.confirm(message)) return;
+    setMenu(null);
+    setPendingDelete(items);
+  }
+
+  requestRemoveRef.current = requestRemove;
+  deleteBlockedRef.current = Boolean(pendingDelete || renaming);
+
+  useEffect(() => {
+    if (project.active_pane_id !== paneId) return;
+    function onKey(event: globalThis.KeyboardEvent) {
+      if (event.key !== "Delete") return;
+      if (deleteBlockedRef.current || isTypingTarget(event.target)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      requestRemoveRef.current();
+    }
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [paneId, project.active_pane_id]);
+
+  async function confirmRemove() {
+    const items = pendingDelete;
+    setPendingDelete(null);
+    if (!items?.length) return;
     try {
       for (const entry of items) {
         await fsDelete(entry.path);
@@ -348,7 +384,7 @@ export function FileExplorer({ project }: { project: Project }) {
         if (entry) setRenaming(entry.path);
         break;
       case "delete":
-        await removeEntry();
+        requestRemove();
         break;
       case "newFile":
         await createItem(false);
@@ -368,8 +404,7 @@ export function FileExplorer({ project }: { project: Project }) {
   }
 
   function onPaneKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    const target = event.target as HTMLElement | null;
-    if (target?.tagName === "INPUT" || target?.tagName === "TEXTAREA") return;
+    if (isTypingTarget(event.target) || pendingDelete) return;
     if (event.key === "F2") {
       event.preventDefault();
       if (focus && selection.selected.has(focus)) setRenaming(focus);
@@ -377,7 +412,7 @@ export function FileExplorer({ project }: { project: Project }) {
     }
     if (event.key === "Delete") {
       event.preventDefault();
-      void removeEntry();
+      requestRemove();
       return;
     }
     const ctrl = event.ctrlKey || event.metaKey;
@@ -666,6 +701,16 @@ export function FileExplorer({ project }: { project: Project }) {
           canPaste={canPaste}
           onAction={(action) => void onMenuAction(action)}
           onClose={() => setMenu(null)}
+        />
+      )}
+      {pendingDelete && deleteCopy && (
+        <ConfirmDialog
+          title={deleteCopy.title}
+          message={deleteCopy.message}
+          confirmLabel="删除"
+          danger
+          onCancel={() => setPendingDelete(null)}
+          onConfirm={() => void confirmRemove()}
         />
       )}
     </div>
