@@ -8,6 +8,7 @@ import { attachImeAnchor } from "./imeAnchor";
 import { parseSessionId } from "./format";
 import { SESSION_KINDS } from "./paneCaps";
 import { shouldCopySelection } from "./terminalCopy";
+import { clientToCell, hostMouseUpAction, isDragGesture, sgrClick, sgrMouse, wheelButton } from "./sgrMouse";
 import { createMouseStripper } from "./stripMouseTracking";
 import { hexToOscRgb, normalizeTheme, xtermThemes, type XtermTheme } from "./theme";
 import { primaryTerminalFont, setPreferredTerminalFont, terminalFontFamily } from "./terminalFonts";
@@ -326,6 +327,13 @@ function copyTerminalSelection(term: Terminal, clear: boolean) {
   });
 }
 
+function eventCell(term: Terminal, clientX: number, clientY: number) {
+  const screen = term.element?.querySelector<HTMLElement>(".xterm-screen");
+  const rect = screen?.getBoundingClientRect();
+  if (!rect) return null;
+  return clientToCell(clientX, clientY, rect, term.cols, term.rows);
+}
+
 function bindTerminalInput(entry: RegistryEntry) {
   const { term, host } = entry;
   term.attachCustomKeyEventHandler((event) => {
@@ -359,15 +367,65 @@ function bindTerminalInput(entry: RegistryEntry) {
     event.stopPropagation();
     if (term.hasSelection()) copyTerminalSelection(term, true);
   };
-  const onMouseUp = () => {
-    if (!copyOnSelectSessions.has(entry.sessionId)) return;
-    if (term.hasSelection()) copyTerminalSelection(term, false);
+
+  let press: { x: number; y: number } | null = null;
+  const onMouseUp = (event: MouseEvent) => {
+    window.removeEventListener("mouseup", onMouseUp);
+    if (!copyOnSelectSessions.has(entry.sessionId)) {
+      press = null;
+      return;
+    }
+    const start = press;
+    press = null;
+    if (!start) return;
+    const startCell = eventCell(term, start.x, start.y);
+    const endCell = eventCell(term, event.clientX, event.clientY);
+    const action = hostMouseUpAction({
+      button: event.button,
+      dragged: isDragGesture({
+        startX: start.x,
+        startY: start.y,
+        endX: event.clientX,
+        endY: event.clientY,
+        startCell,
+        endCell,
+      }),
+      shiftKey: event.shiftKey,
+      hasSelection: term.hasSelection(),
+    });
+    if (action === "copy") {
+      copyTerminalSelection(term, false);
+      return;
+    }
+    if (action === "click" && startCell) {
+      term.clearSelection();
+      void ptyWrite(entry.sessionId, sgrClick(startCell.col, startCell.row)).catch(() => undefined);
+    }
   };
+  const onMouseDown = (event: MouseEvent) => {
+    if (!copyOnSelectSessions.has(entry.sessionId)) return;
+    if (event.button !== 0) return;
+    press = { x: event.clientX, y: event.clientY };
+    window.removeEventListener("mouseup", onMouseUp);
+    window.addEventListener("mouseup", onMouseUp);
+  };
+
   host.addEventListener("contextmenu", onContextMenu, true);
-  host.addEventListener("mouseup", onMouseUp);
+  host.addEventListener("mousedown", onMouseDown);
+  term.attachCustomWheelEventHandler((event) => {
+    if (!copyOnSelectSessions.has(entry.sessionId)) return true;
+    const button = wheelButton(event.deltaX, event.deltaY);
+    const cell = eventCell(term, event.clientX, event.clientY);
+    if (button == null || !cell) return false;
+    event.preventDefault();
+    void ptyWrite(entry.sessionId, sgrMouse(button, cell.col, cell.row)).catch(() => undefined);
+    return false;
+  });
   entry.copyDetach = () => {
     host.removeEventListener("contextmenu", onContextMenu, true);
-    host.removeEventListener("mouseup", onMouseUp);
+    host.removeEventListener("mousedown", onMouseDown);
+    window.removeEventListener("mouseup", onMouseUp);
+    press = null;
   };
 
   const textarea = term.textarea;

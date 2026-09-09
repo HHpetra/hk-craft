@@ -8,7 +8,7 @@ export type AgentProtocolEntry = {
   discover?: string;
   /** Agent hard-exits on a missing --resume log. Drop stale ids and retry bare. */
   resumeFallback?: boolean;
-  /** Terminal mouse is for xterm selection + copy-on-select, not TUI hits. */
+  /** Drag selects in xterm (copy on release); short clicks and wheel go to the TUI. */
   copyOnSelect?: boolean;
 };
 
