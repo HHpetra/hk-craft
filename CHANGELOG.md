@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 文件资源管理器列表列宽可拖拽调整；所有资源管理器共用同一组列宽，重启后保持。
 - 按项目配置远程主机后，资源管理器顶栏可经 Unison 增量镜像上传 / 下载（有进度弹窗）；有 Git 时跳过 `.gitignore`，没有则全量同步并先确认。
 
+### Changed
+- 软件设置改为左侧页签：外观、Agent、工作区、关于。
+
 ## [0.4.0] - 2026-09-09
 
 ### Added
