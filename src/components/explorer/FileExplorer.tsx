@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Folder, File as FileIcon, LayoutGrid, List, Search } from "lucide-react";
+import { listen } from "@tauri-apps/api/event";
+import { Download, Folder, File as FileIcon, LayoutGrid, List, Search, Upload } from "lucide-react";
 import type { DragEvent, KeyboardEvent, MouseEvent, PointerEvent, ReactNode } from "react";
 import {
   clipboardWriteText,
@@ -11,12 +12,16 @@ import {
   fsOpen,
   fsRename,
   fsReveal,
+  syncHasGit,
+  syncProject,
 } from "../../lib/api";
 import { clearFsClipboard, getFsClipboard, setFsClipboard, subscribeFsClipboard } from "../../lib/fsClipboard";
 import { fileName, isValidFileName, joinDir, parentDir, uniqueName } from "../../lib/fsNames";
 import { beginPathDrag } from "../../lib/dnd";
 import { minColumnPct, normalizeColumnWidths, resizeAdjacent } from "../../lib/explorerColumns";
 import { deleteConfirmCopy } from "../../lib/explorerDelete";
+import { remoteSyncConfigured, syncConfirmCopy, syncDoneNotice } from "../../lib/remoteSync";
+import { emptySyncProgress } from "../../lib/syncProgress";
 import {
   applyClear,
   applyClick,
@@ -26,10 +31,11 @@ import {
   type ExplorerSelection,
 } from "../../lib/explorerSelect";
 import { breadcrumbParts, cn, formatAgentInject, formatSize, formatTime, pathsEqual } from "../../lib/format";
-import type { Bookmark, ExplorerView, FileEntry, Project } from "../../types";
+import type { Bookmark, ExplorerView, FileEntry, Project, SyncDirection, SyncProgress } from "../../types";
 import { useWorkspace } from "../../store/workspace";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { ExplorerContextMenu, type ExplorerMenuAction, type ExplorerMenuState } from "./ExplorerContextMenu";
+import { SyncProgressDialog } from "./SyncProgressDialog";
 
 type SortKey = "name" | "modified" | "kind" | "size";
 
@@ -125,6 +131,11 @@ export function FileExplorer({ project, paneId }: { project: Project; paneId: st
   const [renaming, setRenaming] = useState<string | null>(null);
   const [menu, setMenu] = useState<ExplorerMenuState | null>(null);
   const [pendingDelete, setPendingDelete] = useState<FileEntry[] | null>(null);
+  const [pendingSync, setPendingSync] = useState<SyncDirection | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [syncProgress, setSyncProgress] = useState<SyncProgress | null>(null);
+  const [activeSync, setActiveSync] = useState<SyncDirection | null>(null);
+  const [hasGit, setHasGit] = useState(false);
   const [clip, setClip] = useState(getFsClipboard);
   const paneRef = useRef<HTMLDivElement>(null);
   const tableRef = useRef<HTMLTableElement>(null);
@@ -154,6 +165,24 @@ export function FileExplorer({ project, paneId }: { project: Project; paneId: st
     setRoot(project.path);
     setRootLabel("项目根");
     setCurrent(project.path);
+  }, [project?.id, project?.path]);
+
+  useEffect(() => {
+    if (!project?.id) {
+      setHasGit(false);
+      return;
+    }
+    let cancelled = false;
+    void syncHasGit(project.id)
+      .then((value) => {
+        if (!cancelled) setHasGit(value);
+      })
+      .catch(() => {
+        if (!cancelled) setHasGit(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [project?.id, project?.path]);
 
   const reload = useCallback(async () => {
@@ -211,6 +240,42 @@ export function FileExplorer({ project, paneId }: { project: Project; paneId: st
     null;
   const canPaste = Boolean(clip?.items.length);
   const deleteCopy = pendingDelete ? deleteConfirmCopy(pendingDelete) : null;
+  const remoteReady = remoteSyncConfigured(project);
+  const syncCopy = pendingSync ? syncConfirmCopy(pendingSync, hasGit) : null;
+  const remoteHint = "请先在设置中填写该项目的远程主机、用户名与目录";
+
+  async function runRemoteSync(direction: SyncDirection) {
+    setPendingSync(null);
+    if (syncing || syncProgress || !remoteReady) return;
+    setSyncing(true);
+    setActiveSync(direction);
+    setSyncProgress(emptySyncProgress(project.id));
+    const unlisten = await listen<SyncProgress>("sync-progress", (event) => {
+      if (event.payload.project_id !== project.id) return;
+      setSyncProgress(event.payload);
+    });
+    try {
+      const result = await syncProject(project.id, direction);
+      setSyncProgress((prev) => ({
+        ...(prev ?? emptySyncProgress(project.id)),
+        phase: "done",
+        percent: 100,
+        transferred: result.files,
+        deleted: result.deleted,
+      }));
+      setNotice(syncDoneNotice(direction, result));
+      if (direction === "download") await reload();
+    } catch (err) {
+      setSyncProgress((prev) => ({
+        ...(prev ?? emptySyncProgress(project.id)),
+        phase: "error",
+        message: String(err),
+      }));
+      setNotice(String(err));
+    } finally {
+      unlisten();
+    }
+  }
 
   function setSolo(path: string | null) {
     if (!path) {
@@ -336,7 +401,7 @@ export function FileExplorer({ project, paneId }: { project: Project; paneId: st
   }
 
   requestRemoveRef.current = requestRemove;
-  deleteBlockedRef.current = Boolean(pendingDelete || renaming);
+  deleteBlockedRef.current = Boolean(pendingDelete || pendingSync || syncProgress || renaming);
 
   useEffect(() => {
     if (project.active_pane_id !== paneId) return;
@@ -460,7 +525,7 @@ export function FileExplorer({ project, paneId }: { project: Project; paneId: st
   }
 
   function onPaneKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    if (isTypingTarget(event.target) || pendingDelete) return;
+    if (isTypingTarget(event.target) || pendingDelete || pendingSync || syncProgress) return;
     if (event.key === "F2") {
       event.preventDefault();
       if (focus && selection.selected.has(focus)) setRenaming(focus);
@@ -597,6 +662,26 @@ export function FileExplorer({ project, paneId }: { project: Project; paneId: st
               </span>
             ))}
           </nav>
+          <div className="flex shrink-0">
+            <button
+              type="button"
+              title={remoteReady ? "上传到远程" : remoteHint}
+              disabled={!remoteReady || syncing || Boolean(syncProgress)}
+              className="rounded p-1 text-ink-subtle hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+              onClick={() => setPendingSync("upload")}
+            >
+              <Upload size={14} />
+            </button>
+            <button
+              type="button"
+              title={remoteReady ? "从远程下载" : remoteHint}
+              disabled={!remoteReady || syncing || Boolean(syncProgress)}
+              className="rounded p-1 text-ink-subtle hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+              onClick={() => setPendingSync("download")}
+            >
+              <Download size={14} />
+            </button>
+          </div>
           <label className="flex items-center gap-1 rounded-md bg-field px-2 py-1 text-ink-muted">
             <Search size={13} />
             <input
@@ -771,6 +856,27 @@ export function FileExplorer({ project, paneId }: { project: Project; paneId: st
           danger
           onCancel={() => setPendingDelete(null)}
           onConfirm={() => void confirmRemove()}
+        />
+      )}
+      {pendingSync && syncCopy && (
+        <ConfirmDialog
+          title={syncCopy.title}
+          message={syncCopy.message}
+          confirmLabel={pendingSync === "upload" ? "上传" : "下载"}
+          danger={syncCopy.danger}
+          onCancel={() => setPendingSync(null)}
+          onConfirm={() => void runRemoteSync(pendingSync)}
+        />
+      )}
+      {activeSync && syncProgress && (
+        <SyncProgressDialog
+          direction={activeSync}
+          progress={syncProgress}
+          onClose={() => {
+            setSyncProgress(null);
+            setActiveSync(null);
+            setSyncing(false);
+          }}
         />
       )}
     </div>

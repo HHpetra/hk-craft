@@ -8,6 +8,7 @@ mod opencode_hook;
 mod pty;
 mod runner;
 mod session;
+mod sync;
 mod update;
 
 use std::path::PathBuf;
@@ -72,6 +73,8 @@ pub fn run() {
             docker::docker_ensure_running,
             session::discover_agent_sessions,
             runner::delete_runner_persist,
+            sync::sync_has_git,
+            sync::sync_project,
             update::fetch_latest_release_tag,
         ])
         .run(tauri::generate_context!())

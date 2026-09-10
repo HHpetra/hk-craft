@@ -77,6 +77,30 @@ export interface Project {
   panes: WorkspacePane[];
   stowed?: boolean;
   quick_commands?: QuickCommand[];
+  remote_host?: string;
+  remote_user?: string;
+  remote_path?: string;
+}
+
+export type SyncDirection = "upload" | "download";
+
+export interface SyncResult {
+  files: number;
+  deleted: number;
+  used_git: boolean;
+}
+
+export type SyncPhase = "running" | "done" | "error";
+
+export interface SyncProgress {
+  project_id: string;
+  percent: number;
+  speed: string;
+  file: string;
+  transferred: number;
+  deleted: number;
+  phase: SyncPhase | string;
+  message: string;
 }
 
 export interface AppConfig {

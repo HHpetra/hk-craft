@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { notePtyUserInput } from "./ptyActivity";
-import type { AppConfig, DockerContainer, FileEntry, PtySessionStat, SpawnOpts, SpawnResult } from "../types";
+import type { AppConfig, DockerContainer, FileEntry, PtySessionStat, SpawnOpts, SpawnResult, SyncDirection, SyncResult } from "../types";
 
 export function loadConfig() {
   return invoke<AppConfig>("load_config");
@@ -114,4 +114,12 @@ export function dockerListContainers() {
 
 export function dockerEnsureRunning(name: string) {
   return invoke<void>("docker_ensure_running", { name });
+}
+
+export function syncHasGit(projectId: string) {
+  return invoke<boolean>("sync_has_git", { projectId });
+}
+
+export function syncProject(projectId: string, direction: SyncDirection) {
+  return invoke<SyncResult>("sync_project", { projectId, direction });
 }

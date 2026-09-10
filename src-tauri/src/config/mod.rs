@@ -103,6 +103,12 @@ pub struct Project {
     pub stowed: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub quick_commands: Vec<QuickCommand>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub remote_host: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub remote_user: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub remote_path: String,
 }
 
 impl Default for Project {
@@ -119,6 +125,9 @@ impl Default for Project {
             panes: None,
             stowed: false,
             quick_commands: Vec::new(),
+            remote_host: String::new(),
+            remote_user: String::new(),
+            remote_path: String::new(),
         }
     }
 }
@@ -642,6 +651,38 @@ command = "pnpm tauri build"
         let cmds_body = toml::to_string(&with_cmds).expect("serialize commands");
         assert!(cmds_body.contains("quick_commands"));
         assert!(cmds_body.contains("pnpm tauri build"));
+    }
+
+    #[test]
+    fn remote_sync_fields_default_empty_and_skip_toml() {
+        let project = Project {
+            id: "p1".into(),
+            name: "demo".into(),
+            path: "C:/tmp".into(),
+            ..Project::default()
+        };
+        assert!(project.remote_host.is_empty());
+        let body = toml::to_string(&project).expect("serialize project");
+        assert!(!body.contains("remote_host"));
+        assert!(!body.contains("remote_user"));
+        assert!(!body.contains("remote_path"));
+
+        let parsed: Project = toml::from_str(
+            r#"
+name = "demo"
+path = "C:/tmp"
+remote_host = "10.0.0.2"
+remote_user = "dev"
+remote_path = "/home/dev/work"
+"#,
+        )
+        .expect("parse remote fields");
+        assert_eq!(parsed.remote_host, "10.0.0.2");
+        assert_eq!(parsed.remote_user, "dev");
+        assert_eq!(parsed.remote_path, "/home/dev/work");
+        let remote_body = toml::to_string(&parsed).expect("serialize remote");
+        assert!(remote_body.contains("remote_host"));
+        assert!(remote_body.contains("/home/dev/work"));
     }
 
     #[test]

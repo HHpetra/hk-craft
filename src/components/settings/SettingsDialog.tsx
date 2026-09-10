@@ -29,6 +29,9 @@ export function SettingsDialog() {
   const [presets, setPresets] = useState<AgentPreset[]>([]);
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
   const [projectPresets, setProjectPresets] = useState<Record<string, string>>({});
+  const [projectRemotes, setProjectRemotes] = useState<
+    Record<string, { host: string; user: string; path: string }>
+  >({});
   const [bookmarkName, setBookmarkName] = useState("");
   const [bookmarkPath, setBookmarkPath] = useState("");
   const [nerdFonts, setNerdFonts] = useState<string[]>(() => listDetectedNerdFonts());
@@ -48,6 +51,18 @@ export function SettingsDialog() {
     setBookmarks(current.bookmarks.map((b) => ({ ...b })));
     setProjectPresets(
       Object.fromEntries(current.projects.map((p) => [p.id, p.agent_preset])),
+    );
+    setProjectRemotes(
+      Object.fromEntries(
+        current.projects.map((p) => [
+          p.id,
+          {
+            host: p.remote_host ?? "",
+            user: p.remote_user ?? "",
+            path: p.remote_path ?? "",
+          },
+        ]),
+      ),
     );
     void discoverLocalNerdFonts().then(setNerdFonts);
   }, [open]);
@@ -103,9 +118,13 @@ export function SettingsDialog() {
       bookmarks,
       projects: latest.projects.map((project) => {
         const bound = projectPresets[project.id] ?? project.agent_preset;
+        const remote = projectRemotes[project.id];
         return {
           ...project,
           agent_preset: presets.some((p) => p.id === bound) ? bound : fallback,
+          remote_host: (remote?.host ?? project.remote_host ?? "").trim(),
+          remote_user: (remote?.user ?? project.remote_user ?? "").trim(),
+          remote_path: (remote?.path ?? project.remote_path ?? "").trim(),
         };
       }),
     })).then((ok) => {
@@ -297,6 +316,65 @@ export function SettingsDialog() {
                 </select>
               </label>
             ))}
+          </div>
+        </section>
+
+        <section className="mb-5">
+          <div className="mb-2 text-[11px] font-medium uppercase tracking-wider text-ink-subtle">项目远程同步</div>
+          <p className="mb-2 text-[11px] text-ink-subtle">
+            按项目填写主机、用户名与远程目录。资源管理器顶栏可 Unison 增量上传 / 下载；需本机与远程安装匹配版本的 Unison，并已配置 SSH 密钥。
+          </p>
+          <div className="space-y-2">
+            {config.projects.length === 0 && (
+              <div className="text-[12px] text-ink-subtle">暂无项目</div>
+            )}
+            {config.projects.map((project) => {
+              const remote = projectRemotes[project.id] ?? {
+                host: project.remote_host ?? "",
+                user: project.remote_user ?? "",
+                path: project.remote_path ?? "",
+              };
+              return (
+                <div key={project.id} className="space-y-1">
+                  <div className="truncate text-[12px] text-ink">{project.name}</div>
+                  <div className="grid grid-cols-[minmax(0,1fr)_7rem_minmax(0,1.4fr)] gap-1.5">
+                    <input
+                      value={remote.host}
+                      onChange={(e) =>
+                        setProjectRemotes((s) => ({
+                          ...s,
+                          [project.id]: { ...remote, host: e.target.value },
+                        }))
+                      }
+                      placeholder="主机 / IP"
+                      className="rounded bg-field px-2 py-1 text-[12px] text-ink outline-none"
+                    />
+                    <input
+                      value={remote.user}
+                      onChange={(e) =>
+                        setProjectRemotes((s) => ({
+                          ...s,
+                          [project.id]: { ...remote, user: e.target.value },
+                        }))
+                      }
+                      placeholder="用户名"
+                      className="rounded bg-field px-2 py-1 text-[12px] text-ink outline-none"
+                    />
+                    <input
+                      value={remote.path}
+                      onChange={(e) =>
+                        setProjectRemotes((s) => ({
+                          ...s,
+                          [project.id]: { ...remote, path: e.target.value },
+                        }))
+                      }
+                      placeholder="/home/user/project"
+                      className="rounded bg-field px-2 py-1 text-[12px] text-ink outline-none"
+                    />
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </section>
 
