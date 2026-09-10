@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AgentPreset, Project, WorkspacePane } from "../types";
-import { agentPanesToRestart, planPaneLaunch } from "./paneLaunch";
+import { agentPanesToRestart, planPaneLaunch, planProjectLaunches } from "./paneLaunch";
 import { DEFAULT_DOCKER_SHELLS } from "./dockerLaunch";
 import { commandPayload } from "./quickCommands";
 
@@ -270,6 +270,90 @@ describe("planPaneLaunch", () => {
     expect(plan.input.container).toBe("db");
     expect(plan.input.postWrite).toBeNull();
     expect(plan.input.killFirst).toBe(true);
+  });
+});
+
+describe("planProjectLaunches", () => {
+  it("plans one entry per terminal pane and skips explorer panes", () => {
+    const launches = planProjectLaunches({
+      project: project({ panes: [explorerPane, agentPane, runnerPane] }),
+      presets: [cursor],
+      resumeOnStart: true,
+      statusOf: () => "idle",
+    });
+    expect(launches.map((item) => item.paneId)).toEqual(["a1", "r1"]);
+    expect(launches[0].plan.kind).toBe("agent");
+    expect(launches[1].plan.kind).toBe("runner");
+  });
+
+  it("asks the caller for each pane's status by its session id", () => {
+    const asked: string[] = [];
+    planProjectLaunches({
+      project: project({ panes: [agentPane, runnerPane] }),
+      presets: [cursor],
+      resumeOnStart: true,
+      statusOf: (sid) => {
+        asked.push(sid);
+        return "idle";
+      },
+    });
+    expect(asked).toEqual(["proj:agent:a1", "proj:runner:r1"]);
+  });
+
+  it("skips live panes so ensure does not respawn them", () => {
+    const launches = planProjectLaunches({
+      project: project({ panes: [agentPane, runnerPane] }),
+      presets: [cursor],
+      resumeOnStart: true,
+      statusOf: (sid) => (sid === "proj:agent:a1" ? "running" : "idle"),
+    });
+    expect(launches.map((item) => item.paneId)).toEqual(["r1"]);
+  });
+
+  it("returns nothing when every pane is already live", () => {
+    expect(
+      planProjectLaunches({
+        project: project({ panes: [agentPane, runnerPane] }),
+        presets: [cursor],
+        resumeOnStart: true,
+        statusOf: () => "waiting",
+      }),
+    ).toEqual([]);
+  });
+
+  it("resumes a stored agent session only when resume-on-start is on", () => {
+    const base = {
+      project: project({ panes: [agentPane] }),
+      presets: [cursor],
+      statusOf: () => "exited" as const,
+    };
+    const on = planProjectLaunches({ ...base, resumeOnStart: true });
+    if (on[0].plan.kind !== "agent") throw new Error("expected agent plan");
+    expect(on[0].plan.spawn.args).toEqual(["--resume", "chat-9"]);
+
+    const off = planProjectLaunches({ ...base, resumeOnStart: false });
+    if (off[0].plan.kind !== "agent") throw new Error("expected agent plan");
+    expect(off[0].plan.spawn.args).toEqual([]);
+  });
+
+  it("carries the project's agent_seen flag into the agent plan", () => {
+    const unseen = planProjectLaunches({
+      project: project({ panes: [agentPane], agent_seen: false }),
+      presets: [cursor],
+      resumeOnStart: true,
+      statusOf: () => "exited",
+    });
+    if (unseen[0].plan.kind !== "agent") throw new Error("expected agent plan");
+    expect(unseen[0].plan.markAgentSeen).toBe(true);
+
+    const seen = planProjectLaunches({
+      project: project({ panes: [agentPane], agent_seen: true }),
+      presets: [cursor],
+      resumeOnStart: true,
+      statusOf: () => "exited",
+    });
+    if (seen[0].plan.kind !== "agent") throw new Error("expected agent plan");
+    expect(seen[0].plan.markAgentSeen).toBe(false);
   });
 });
 

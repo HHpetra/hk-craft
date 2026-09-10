@@ -13,15 +13,16 @@ import type {
   WorkspacePane,
 } from "../types";
 import { agentTargets, liveAgentTargets } from "../lib/agentProtocol";
-import { planCapturedSessions, type SessionAssignment } from "../lib/agentSessionAssign";
+import { planCapturedSessions } from "../lib/agentSessionAssign";
+import { applySessionAssignments } from "../lib/agentSessionApply";
 import { checkDir, deleteRunnerPersist, discoverAgentSessions, dockerEnsureRunning, loadConfig, ptyKill, ptyList, ptySpawn, ptyWrite, saveConfig } from "../lib/api";
 import { dockerLaunchNotice, dockerLaunchStatus, executeDockerLaunch } from "../lib/dockerLaunch";
 import { normalizeColumnWidths } from "../lib/explorerColumns";
 import { beginPaneLaunch, cancelPaneLaunch, endPaneLaunch, requestPaneRelaunch, takePendingRelaunch } from "../lib/paneLaunchLock";
 import { pathsEqual, sessionId } from "../lib/format";
 import { getPtyActivity } from "../lib/ptyActivity";
-import { agentPanesToRestart, planPaneLaunch, type AgentRestartReason, type PaneLaunchPlan } from "../lib/paneLaunch";
-import { createDockerPane, createPane, neighborPaneId, normalizeLayout, paneSessionId, projectSessionIds, terminalPanes, withDefaultWorkspace } from "../lib/panes";
+import { agentPanesToRestart, planPaneLaunch, planProjectLaunches, type AgentRestartReason, type PaneLaunchPlan } from "../lib/paneLaunch";
+import { createDockerPane, createPane, neighborPaneId, normalizeLayout, paneSessionId, projectSessionIds, withDefaultWorkspace } from "../lib/panes";
 import {
   ensureOpened,
   nextWorkingId,
@@ -167,32 +168,6 @@ const enqueuePersist = createSerialQueue();
 function paneActivity(projectId: string, paneId: string) {
   const track = getPtyActivity(sessionId(projectId, "agent", paneId));
   return { lastUserWrite: track.lastUserWrite, lastOutput: track.lastOutput };
-}
-
-function applySessionAssignments(config: AppConfig, assignments: SessionAssignment[]): AppConfig | null {
-  if (assignments.length === 0) return null;
-  const byProject = new Map<string, Map<string, string | null>>();
-  for (const assignment of assignments) {
-    const panes = byProject.get(assignment.projectId) ?? new Map<string, string | null>();
-    panes.set(assignment.paneId, assignment.sessionId);
-    byProject.set(assignment.projectId, panes);
-  }
-  let changed = false;
-  const projects = config.projects.map((project) => {
-    const paneUpdates = byProject.get(project.id);
-    if (!paneUpdates) return project;
-    let projectChanged = false;
-    const panes = project.panes.map((pane) => {
-      if (!paneUpdates.has(pane.id) || pane.kind !== "agent") return pane;
-      const nextId = paneUpdates.get(pane.id) ?? null;
-      if ((pane.agent_session_id ?? null) === nextId) return pane;
-      projectChanged = true;
-      changed = true;
-      return { ...pane, agent_session_id: nextId };
-    });
-    return projectChanged ? { ...project, panes } : project;
-  });
-  return changed ? { ...config, projects } : null;
 }
 
 type WorkspaceGet = () => WorkspaceState;
@@ -814,22 +789,12 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     }
     const current = get().config?.projects.find((item) => item.id === project.id) ?? project;
     const presets = get().config?.agent_presets ?? config.agent_presets;
-    const agentSeen = current.agent_seen;
-    const launches: Promise<boolean>[] = [];
-    for (const pane of terminalPanes(current)) {
-      const sid = paneSessionId(current.id, pane);
-      const plan = planPaneLaunch({
-        mode: "ensure",
-        project: current,
-        pane,
-        presets,
-        resumeOnStart,
-        status: sid ? get().sessionStatus[sid] : undefined,
-        agentSeen,
-      });
-      if (!plan || plan.action === "skip") continue;
-      launches.push(executePaneLaunch(get, plan, current.id, pane.id));
-    }
+    const launches = planProjectLaunches({
+      project: current,
+      presets,
+      resumeOnStart,
+      statusOf: (sid) => get().sessionStatus[sid],
+    }).map(({ paneId, plan }) => executePaneLaunch(get, plan, current.id, paneId));
     await Promise.all(launches);
   },
 

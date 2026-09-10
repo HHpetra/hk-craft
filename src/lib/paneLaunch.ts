@@ -1,6 +1,6 @@
 import type { AgentPreset, Project, SessionStatus, SpawnOpts, WorkspacePane } from "../types";
 import { DEFAULT_DOCKER_SHELLS, type DockerLaunchInput } from "./dockerLaunch";
-import { paneSessionId } from "./panes";
+import { paneSessionId, terminalPanes } from "./panes";
 import { commandPayload } from "./quickCommands";
 import { resolveAgentCommand, resolvePresetCommand, resumeArgsForSession, resumeHardFails } from "./agentProtocol";
 
@@ -107,6 +107,42 @@ export function planPaneLaunch(input: {
     resumeFallback,
     markAgentSeen: input.mode === "ensure" && !input.agentSeen,
   };
+}
+
+export type PlannedPaneLaunch = {
+  paneId: string;
+  plan: Extract<PaneLaunchPlan, { action: "spawn" }>;
+};
+
+/**
+ * Plan every terminal pane of a project for the "ensure" (open/activate) flow.
+ *
+ * Pure: the caller injects how to read the current session status. Live panes
+ * are skipped inside `planPaneLaunch`, explorer panes yield no session id, and
+ * only real spawn plans come back — so the caller just executes them.
+ */
+export function planProjectLaunches(input: {
+  project: Project;
+  presets: AgentPreset[];
+  resumeOnStart: boolean;
+  statusOf: (sessionId: string) => SessionStatus | undefined;
+}): PlannedPaneLaunch[] {
+  const launches: PlannedPaneLaunch[] = [];
+  for (const pane of terminalPanes(input.project)) {
+    const sessionId = paneSessionId(input.project.id, pane);
+    const plan = planPaneLaunch({
+      mode: "ensure",
+      project: input.project,
+      pane,
+      presets: input.presets,
+      resumeOnStart: input.resumeOnStart,
+      status: sessionId ? input.statusOf(sessionId) : undefined,
+      agentSeen: input.project.agent_seen,
+    });
+    if (!plan || plan.action === "skip") continue;
+    launches.push({ paneId: pane.id, plan });
+  }
+  return launches;
 }
 
 export function agentPanesToRestart(
