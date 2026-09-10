@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Folder, File as FileIcon, LayoutGrid, List, Search } from "lucide-react";
-import type { DragEvent, KeyboardEvent, MouseEvent, ReactNode } from "react";
+import type { DragEvent, KeyboardEvent, MouseEvent, PointerEvent, ReactNode } from "react";
 import {
   clipboardWriteText,
   fsCopy,
@@ -15,6 +15,7 @@ import {
 import { clearFsClipboard, getFsClipboard, setFsClipboard, subscribeFsClipboard } from "../../lib/fsClipboard";
 import { fileName, isValidFileName, joinDir, parentDir, uniqueName } from "../../lib/fsNames";
 import { beginPathDrag } from "../../lib/dnd";
+import { minColumnPct, normalizeColumnWidths, resizeAdjacent } from "../../lib/explorerColumns";
 import { deleteConfirmCopy } from "../../lib/explorerDelete";
 import {
   applyClear,
@@ -31,6 +32,13 @@ import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { ExplorerContextMenu, type ExplorerMenuAction, type ExplorerMenuState } from "./ExplorerContextMenu";
 
 type SortKey = "name" | "modified" | "kind" | "size";
+
+const LIST_COLUMNS: readonly { key: SortKey; label: string }[] = [
+  { key: "name", label: "名称" },
+  { key: "modified", label: "修改日期" },
+  { key: "kind", label: "类型" },
+  { key: "size", label: "大小" },
+];
 
 function isTypingTarget(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) return false;
@@ -98,6 +106,11 @@ export function FileExplorer({ project, paneId }: { project: Project; paneId: st
     ? "icons"
     : "list") as ExplorerView;
   const setExplorerView = useWorkspace((s) => s.setExplorerView);
+  const columnWidths = normalizeColumnWidths(
+    useWorkspace((s) => s.config?.settings.explorer_column_widths),
+  );
+  const previewExplorerColumnWidths = useWorkspace((s) => s.previewExplorerColumnWidths);
+  const setExplorerColumnWidths = useWorkspace((s) => s.setExplorerColumnWidths);
   const setNotice = useWorkspace((s) => s.setNotice);
   const [root, setRoot] = useState(project?.path ?? "");
   const [rootLabel, setRootLabel] = useState(project?.name ?? "项目根");
@@ -114,8 +127,18 @@ export function FileExplorer({ project, paneId }: { project: Project; paneId: st
   const [pendingDelete, setPendingDelete] = useState<FileEntry[] | null>(null);
   const [clip, setClip] = useState(getFsClipboard);
   const paneRef = useRef<HTMLDivElement>(null);
+  const tableRef = useRef<HTMLTableElement>(null);
+  const columnWidthsRef = useRef(columnWidths);
+  const columnDragRef = useRef<{
+    index: number;
+    startX: number;
+    startWidths: number[];
+    tableWidth: number;
+    minPct: number;
+  } | null>(null);
   const requestRemoveRef = useRef<(items?: FileEntry[]) => void>(() => undefined);
   const deleteBlockedRef = useRef(false);
+  columnWidthsRef.current = columnWidths;
 
   const agentPrefix = presets.find((preset) => preset.id === project.agent_preset)?.drag_prefix ?? "@";
 
@@ -205,6 +228,39 @@ export function FileExplorer({ project, paneId }: { project: Project; paneId: st
       setSortKey(key);
       setSortAsc(true);
     }
+  }
+
+  function onColumnResizePointerDown(event: PointerEvent<HTMLSpanElement>, index: number) {
+    event.preventDefault();
+    event.stopPropagation();
+    const tableWidth = tableRef.current?.getBoundingClientRect().width ?? 0;
+    if (tableWidth <= 0) return;
+    columnDragRef.current = {
+      index,
+      startX: event.clientX,
+      startWidths: [...columnWidths],
+      tableWidth,
+      minPct: minColumnPct(tableWidth),
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function onColumnResizePointerMove(event: PointerEvent<HTMLSpanElement>) {
+    const drag = columnDragRef.current;
+    if (!drag || drag.tableWidth <= 0) return;
+    const deltaPct = ((event.clientX - drag.startX) / drag.tableWidth) * 100;
+    const next = resizeAdjacent(drag.startWidths, drag.index, deltaPct, drag.minPct);
+    columnWidthsRef.current = next;
+    previewExplorerColumnWidths(next);
+  }
+
+  function onColumnResizePointerUp(event: PointerEvent<HTMLSpanElement>) {
+    if (!columnDragRef.current) return;
+    columnDragRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    void setExplorerColumnWidths(columnWidthsRef.current);
   }
 
   function openBookmark(item: Bookmark, label?: string) {
@@ -630,28 +686,32 @@ export function FileExplorer({ project, paneId }: { project: Project; paneId: st
               ))}
             </div>
           ) : (
-            <table className="w-full table-fixed text-left">
+            <table ref={tableRef} className="w-full table-fixed text-left">
               <colgroup>
-                <col className="w-[42%]" />
-                <col className="w-[28%]" />
-                <col className="w-[16%]" />
-                <col className="w-[14%]" />
+                {columnWidths.map((width, index) => (
+                  <col key={LIST_COLUMNS[index].key} style={{ width: `${width}%` }} />
+                ))}
               </colgroup>
               <thead className="sticky top-0 bg-surface-header text-[11px] uppercase tracking-wide text-ink-subtle">
                 <tr>
-                  {(
-                    [
-                      ["name", "名称"],
-                      ["modified", "修改日期"],
-                      ["kind", "类型"],
-                      ["size", "大小"],
-                    ] as const
-                  ).map(([key, label]) => (
-                    <th key={key} className="truncate px-3 py-2 font-medium">
-                      <button type="button" onClick={() => toggleSort(key)}>
+                  {LIST_COLUMNS.map(({ key, label }, index) => (
+                    <th key={key} className="relative min-w-16 px-3 py-2 font-medium">
+                      <button type="button" className="truncate" onClick={() => toggleSort(key)}>
                         {label}
                         {sortKey === key ? (sortAsc ? " ↑" : " ↓") : ""}
                       </button>
+                      {index < LIST_COLUMNS.length - 1 && (
+                        <span
+                          role="separator"
+                          aria-orientation="vertical"
+                          aria-label="调整列宽"
+                          className="absolute top-0 right-0 z-10 h-full w-2 translate-x-1/2 cursor-col-resize touch-none"
+                          onPointerDown={(event) => onColumnResizePointerDown(event, index)}
+                          onPointerMove={onColumnResizePointerMove}
+                          onPointerUp={onColumnResizePointerUp}
+                          onPointerCancel={onColumnResizePointerUp}
+                        />
+                      )}
                     </th>
                   ))}
                 </tr>
@@ -671,7 +731,7 @@ export function FileExplorer({ project, paneId }: { project: Project; paneId: st
                       selection.selected.has(entry.path) && "bg-active",
                     )}
                   >
-                    <td className="overflow-hidden whitespace-nowrap px-3 py-1.5">
+                    <td className="min-w-16 overflow-hidden whitespace-nowrap px-3 py-1.5">
                       <span className="flex min-w-0 items-center gap-2">
                         {entry.is_dir ? (
                           <Folder size={14} className="shrink-0 text-sky-500" />
@@ -681,11 +741,11 @@ export function FileExplorer({ project, paneId }: { project: Project; paneId: st
                         {renderName(entry)}
                       </span>
                     </td>
-                    <td className="truncate px-3 py-1.5 text-ink-muted">
+                    <td className="min-w-16 truncate px-3 py-1.5 text-ink-muted">
                       {formatTime(entry.modified)}
                     </td>
-                    <td className="truncate px-3 py-1.5 text-ink-muted">{entry.kind}</td>
-                    <td className="truncate px-3 py-1.5 text-ink-muted">
+                    <td className="min-w-16 truncate px-3 py-1.5 text-ink-muted">{entry.kind}</td>
+                    <td className="min-w-16 truncate px-3 py-1.5 text-ink-muted">
                       {formatSize(entry.size, entry.is_dir)}
                     </td>
                   </tr>

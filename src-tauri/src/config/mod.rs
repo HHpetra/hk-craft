@@ -29,6 +29,8 @@ pub struct Settings {
     pub active_project_id: Option<String>,
     #[serde(default = "default_explorer_view")]
     pub explorer_view: String,
+    #[serde(default = "default_explorer_column_widths")]
+    pub explorer_column_widths: Vec<f64>,
     #[serde(default = "default_true")]
     pub resume_on_start: bool,
     #[serde(default)]
@@ -139,6 +141,7 @@ impl Default for Settings {
             default_split_ratio: default_split_ratio(),
             active_project_id: None,
             explorer_view: default_explorer_view(),
+            explorer_column_widths: default_explorer_column_widths(),
             resume_on_start: true,
             terminal_font: String::new(),
             last_agent_size: Vec::new(),
@@ -154,6 +157,14 @@ fn default_theme() -> String {
 
 fn default_explorer_view() -> String {
     "list".into()
+}
+
+fn default_explorer_column_widths() -> Vec<f64> {
+    vec![42.0, 28.0, 16.0, 14.0]
+}
+
+fn valid_explorer_column_widths(widths: &[f64]) -> bool {
+    widths.len() == 4 && widths.iter().all(|value| value.is_finite() && *value >= 8.0)
 }
 
 fn default_split_ratio() -> Vec<f64> {
@@ -291,6 +302,9 @@ impl AppConfig {
         if self.settings.explorer_view != "icons" {
             self.settings.explorer_view = "list".into();
         }
+        if !valid_explorer_column_widths(&self.settings.explorer_column_widths) {
+            self.settings.explorer_column_widths = default_explorer_column_widths();
+        }
         for project in &mut self.projects {
             if project.id.is_empty() {
                 project.id = uuid::Uuid::new_v4().to_string();
@@ -395,6 +409,10 @@ mod tests {
         assert_eq!(cfg.agent_presets[4].command, "dsh-tui");
         assert_eq!(cfg.settings.theme, "dark");
         assert_eq!(cfg.settings.explorer_view, "list");
+        assert_eq!(
+            cfg.settings.explorer_column_widths,
+            vec![42.0, 28.0, 16.0, 14.0]
+        );
         assert_eq!(cfg.settings.default_split_ratio, vec![30.0, 40.0, 30.0]);
     }
 
@@ -411,6 +429,38 @@ mod tests {
         cfg.migrate();
         assert!(!cfg.projects[0].id.is_empty());
         assert_eq!(cfg.projects[0].agent_preset, "cursor-agent");
+    }
+
+    #[test]
+    fn migrate_resets_invalid_explorer_column_widths() {
+        let mut cfg = AppConfig::default();
+        cfg.settings.explorer_column_widths = vec![90.0, 10.0];
+        cfg.migrate();
+        assert_eq!(
+            cfg.settings.explorer_column_widths,
+            vec![42.0, 28.0, 16.0, 14.0]
+        );
+
+        cfg.settings.explorer_column_widths = vec![40.0, 30.0, 0.0, 30.0];
+        cfg.migrate();
+        assert_eq!(
+            cfg.settings.explorer_column_widths,
+            vec![42.0, 28.0, 16.0, 14.0]
+        );
+
+        cfg.settings.explorer_column_widths = vec![90.0, 5.0, 3.0, 2.0];
+        cfg.migrate();
+        assert_eq!(
+            cfg.settings.explorer_column_widths,
+            vec![42.0, 28.0, 16.0, 14.0]
+        );
+
+        cfg.settings.explorer_column_widths = vec![50.0, 20.0, 15.0, 15.0];
+        cfg.migrate();
+        assert_eq!(
+            cfg.settings.explorer_column_widths,
+            vec![50.0, 20.0, 15.0, 15.0]
+        );
     }
 
     #[test]

@@ -16,6 +16,7 @@ import { agentTargets, liveAgentTargets } from "../lib/agentProtocol";
 import { planCapturedSessions, type SessionAssignment } from "../lib/agentSessionAssign";
 import { checkDir, deleteRunnerPersist, discoverAgentSessions, dockerEnsureRunning, loadConfig, ptyKill, ptyList, ptySpawn, ptyWrite, saveConfig } from "../lib/api";
 import { dockerLaunchNotice, dockerLaunchStatus, executeDockerLaunch } from "../lib/dockerLaunch";
+import { normalizeColumnWidths } from "../lib/explorerColumns";
 import { beginPaneLaunch, cancelPaneLaunch, endPaneLaunch, requestPaneRelaunch, takePendingRelaunch } from "../lib/paneLaunchLock";
 import { pathsEqual, sessionId } from "../lib/format";
 import { getPtyActivity } from "../lib/ptyActivity";
@@ -94,6 +95,8 @@ interface WorkspaceState {
   setResumeOnStart: (resume: boolean) => Promise<void>;
   setTerminalFont: (family: string) => Promise<void>;
   setExplorerView: (view: ExplorerView) => Promise<void>;
+  previewExplorerColumnWidths: (widths: number[]) => void;
+  setExplorerColumnWidths: (widths: number[]) => Promise<void>;
 }
 
 const defaultConfig = (): AppConfig => ({
@@ -102,6 +105,7 @@ const defaultConfig = (): AppConfig => ({
     default_split_ratio: [30, 40, 30],
     active_project_id: null,
     explorer_view: "list",
+    explorer_column_widths: [42, 28, 16, 14],
     resume_on_start: true,
     terminal_font: "",
   },
@@ -909,6 +913,21 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     const { config } = get();
     if (!config) return;
     await get().persist((latest) => patchSettings(latest, { explorer_view: view }));
+  },
+
+  previewExplorerColumnWidths: (widths) => {
+    const { config } = get();
+    if (!config) return;
+    set({
+      config: patchSettings(config, { explorer_column_widths: [...normalizeColumnWidths(widths)] }),
+    });
+  },
+
+  setExplorerColumnWidths: async (widths) => {
+    const { config } = get();
+    if (!config) return;
+    const next = [...normalizeColumnWidths(widths)];
+    await get().persist((latest) => patchSettings(latest, { explorer_column_widths: next }));
   },
 }));
 

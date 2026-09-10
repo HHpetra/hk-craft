@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Added
+- 文件资源管理器列表列宽可拖拽调整；所有资源管理器共用同一组列宽，重启后保持。
+
 ## [0.4.0] - 2026-09-09
 
 ### Added

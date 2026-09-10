@@ -15,6 +15,7 @@ export interface Settings {
   default_split_ratio: number[];
   active_project_id: string | null;
   explorer_view: string;
+  explorer_column_widths?: number[];
   resume_on_start: boolean;
   terminal_font: string;
   last_agent_size?: [number, number];
