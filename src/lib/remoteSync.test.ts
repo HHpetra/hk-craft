@@ -41,10 +41,12 @@ describe("syncConfirmCopy", () => {
 });
 
 describe("syncDoneNotice", () => {
-  it("mentions deleted extras when present", () => {
-    expect(syncDoneNotice("upload", { files: 12, deleted: 3, used_git: true })).toBe(
-      "已上传 12 个文件，删除多余 3 个",
-    );
-    expect(syncDoneNotice("download", { files: 4, deleted: 0, used_git: false })).toBe("已下载 4 个文件");
+  it("breaks down added, modified and deleted", () => {
+    expect(
+      syncDoneNotice("upload", { files: 12, added: 9, modified: 3, deleted: 3, used_git: true }),
+    ).toBe("已上传：增加 9 个，修改 3 个，删除 3 个");
+    expect(
+      syncDoneNotice("download", { files: 4, added: 4, modified: 0, deleted: 0, used_git: false }),
+    ).toBe("已下载：增加 4 个，修改 0 个，删除 0 个");
   });
 });

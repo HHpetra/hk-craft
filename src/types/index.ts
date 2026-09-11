@@ -86,18 +86,25 @@ export type SyncDirection = "upload" | "download";
 
 export interface SyncResult {
   files: number;
+  added: number;
+  modified: number;
   deleted: number;
   used_git: boolean;
 }
 
 export type SyncPhase = "running" | "done" | "error";
 
+export type SyncFileOp = "add" | "modify" | "delete" | "";
+
 export interface SyncProgress {
   project_id: string;
   percent: number;
   speed: string;
   file: string;
+  op?: SyncFileOp | string;
   transferred: number;
+  added: number;
+  modified: number;
   deleted: number;
   phase: SyncPhase | string;
   message: string;

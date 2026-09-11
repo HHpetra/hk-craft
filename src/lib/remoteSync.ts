@@ -45,9 +45,6 @@ export function syncConfirmCopy(
 }
 
 export function syncDoneNotice(direction: SyncDirection, result: SyncResult): string {
-  const extra = result.deleted > 0 ? `，删除多余 ${result.deleted} 个` : "";
-  if (direction === "upload") {
-    return `已上传 ${result.files} 个文件${extra}`;
-  }
-  return `已下载 ${result.files} 个文件${extra}`;
+  const counts = `增加 ${result.added} 个，修改 ${result.modified} 个，删除 ${result.deleted} 个`;
+  return direction === "upload" ? `已上传：${counts}` : `已下载：${counts}`;
 }

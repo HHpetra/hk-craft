@@ -261,6 +261,8 @@ export function FileExplorer({ project, paneId }: { project: Project; paneId: st
         phase: "done",
         percent: 100,
         transferred: result.files,
+        added: result.added,
+        modified: result.modified,
         deleted: result.deleted,
       }));
       setNotice(syncDoneNotice(direction, result));

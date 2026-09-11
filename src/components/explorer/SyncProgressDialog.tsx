@@ -1,6 +1,6 @@
 import { createPortal } from "react-dom";
 import type { SyncDirection, SyncProgress } from "../../types";
-import { clampPercent, syncProgressDetail, syncProgressTitle } from "../../lib/syncProgress";
+import { clampPercent, syncProgressCurrent, syncProgressTitle } from "../../lib/syncProgress";
 
 export function SyncProgressDialog({
   direction,
@@ -15,6 +15,7 @@ export function SyncProgressDialog({
   const percent = clampPercent(progress.percent);
   const title = syncProgressTitle(direction, progress.phase);
   const failed = progress.phase === "error";
+  const current = syncProgressCurrent(progress);
 
   return createPortal(
     <div
@@ -33,9 +34,14 @@ export function SyncProgressDialog({
             style={{ width: `${failed ? 100 : percent}%` }}
           />
         </div>
-        <div className="mb-1 text-[11px] text-ink-muted">{failed ? "" : `${percent}%`}</div>
+        <div className="mb-3 text-[11px] text-ink-muted">{failed ? "" : `${percent}%`}</div>
+        <div className="mb-3 grid grid-cols-3 gap-2 text-center">
+          <CountCell label="增加" value={progress.added} />
+          <CountCell label="修改" value={progress.modified} />
+          <CountCell label="删除" value={progress.deleted} />
+        </div>
         <p className="mb-5 whitespace-pre-wrap text-[12px] leading-5 text-ink-muted">
-          {syncProgressDetail(progress)}
+          {failed ? progress.message || "同步失败" : current}
         </p>
         {done && (
           <div className="flex justify-end">
@@ -51,5 +57,14 @@ export function SyncProgressDialog({
       </div>
     </div>,
     document.body,
+  );
+}
+
+function CountCell({ label, value }: { label: string; value: number }) {
+  return (
+    <div>
+      <div className="text-[11px] text-ink-subtle">{label}</div>
+      <div className="text-[13px] tabular-nums text-ink">{value}</div>
+    </div>
   );
 }

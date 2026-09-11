@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - 软件设置改为左侧页签：外观、Agent、工作区、关于。
+- 同步进度按增加、修改、删除分别计数显示。
 
 ## [0.4.0] - 2026-09-09
 

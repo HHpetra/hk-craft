@@ -6,7 +6,10 @@ export function emptySyncProgress(projectId: string): SyncProgress {
     percent: 0,
     speed: "",
     file: "",
+    op: "",
     transferred: 0,
+    added: 0,
+    modified: 0,
     deleted: 0,
     phase: "running",
     message: "",
@@ -19,17 +22,36 @@ export function syncProgressTitle(direction: SyncDirection, phase: string): stri
   return direction === "upload" ? "正在上传" : "正在下载";
 }
 
+export function syncOpLabel(op: string | undefined): string {
+  if (op === "modify") return "修改";
+  if (op === "delete") return "删除";
+  if (op === "add") return "增加";
+  return "";
+}
+
+export function syncProgressCounts(progress: {
+  added: number;
+  modified: number;
+  deleted: number;
+}): string {
+  return `增加 ${progress.added} 个，修改 ${progress.modified} 个，删除 ${progress.deleted} 个`;
+}
+
+export function syncProgressCurrent(progress: SyncProgress): string {
+  const parts: string[] = [];
+  const op = syncOpLabel(progress.op);
+  if (progress.file) parts.push(op ? `${op} ${progress.file}` : progress.file);
+  if (progress.speed) parts.push(progress.speed);
+  return parts.join(" · ");
+}
+
 export function syncProgressDetail(progress: SyncProgress): string {
   if (progress.phase === "error") {
     return progress.message || "同步失败";
   }
-  const parts: string[] = [];
-  if (progress.file) parts.push(progress.file);
-  if (progress.speed) parts.push(progress.speed);
-  const counts = `已传输 ${progress.transferred} 个`;
-  const extra = progress.deleted > 0 ? `，删除 ${progress.deleted} 个` : "";
-  parts.push(`${counts}${extra}`);
-  return parts.join(" · ");
+  const current = syncProgressCurrent(progress);
+  const counts = syncProgressCounts(progress);
+  return current ? `${current} · ${counts}` : counts;
 }
 
 export function clampPercent(value: number): number {

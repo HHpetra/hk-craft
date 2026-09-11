@@ -30,6 +30,8 @@ pub enum SyncDirection {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct SyncResult {
     pub files: usize,
+    pub added: usize,
+    pub modified: usize,
     pub deleted: usize,
     pub used_git: bool,
 }
@@ -40,7 +42,10 @@ pub struct SyncProgress {
     pub percent: u8,
     pub speed: String,
     pub file: String,
+    pub op: String,
     pub transferred: usize,
+    pub added: usize,
+    pub modified: usize,
     pub deleted: usize,
     pub phase: String,
     pub message: String,
@@ -50,6 +55,7 @@ pub struct SyncProgress {
 pub enum UnisonLine {
     Scan,
     Copy(String),
+    Update(String),
     Delete(String),
     Error(String),
 }
@@ -140,6 +146,16 @@ pub fn gitignore_to_unison_ignore(raw: &str) -> Option<String> {
     }
 }
 
+fn bgn_path(line: &str, prefix: &str) -> Option<String> {
+    let rest = line.strip_prefix(prefix)?;
+    let file = rest.split(" from ").next().unwrap_or(rest).trim();
+    if file.is_empty() {
+        None
+    } else {
+        Some(file.to_string())
+    }
+}
+
 pub fn parse_unison_line(line: &str) -> Option<UnisonLine> {
     let line = line.trim();
     if line.is_empty() {
@@ -149,19 +165,14 @@ pub fn parse_unison_line(line: &str) -> Option<UnisonLine> {
     if lower.contains("fatal error") || lower.starts_with("error:") {
         return Some(UnisonLine::Error(line.to_string()));
     }
-    if let Some(rest) = line.strip_prefix("[BGN] Copying ") {
-        let file = rest.split(" from ").next().unwrap_or(rest).trim();
-        if file.is_empty() {
-            return None;
-        }
-        return Some(UnisonLine::Copy(file.to_string()));
+    if let Some(file) = bgn_path(line, "[BGN] Updating file ") {
+        return Some(UnisonLine::Update(file));
     }
-    if let Some(rest) = line.strip_prefix("[BGN] Deleting ") {
-        let file = rest.split(" from ").next().unwrap_or(rest).trim();
-        if file.is_empty() {
-            return None;
-        }
-        return Some(UnisonLine::Delete(file.to_string()));
+    if let Some(file) = bgn_path(line, "[BGN] Copying ") {
+        return Some(UnisonLine::Copy(file));
+    }
+    if let Some(file) = bgn_path(line, "[BGN] Deleting ") {
+        return Some(UnisonLine::Delete(file));
     }
     if line.starts_with("Looking for changes")
         || line.starts_with("Reconciling changes")
@@ -293,11 +304,21 @@ fn apply_line(progress: &mut SyncProgress, line: &str, errors: &mut Vec<String>)
         Some(UnisonLine::Error(msg)) => errors.push(msg),
         Some(UnisonLine::Copy(file)) => {
             progress.file = file;
+            progress.op = "add".into();
+            progress.added += 1;
+            progress.transferred += 1;
+            bump_percent(progress);
+        }
+        Some(UnisonLine::Update(file)) => {
+            progress.file = file;
+            progress.op = "modify".into();
+            progress.modified += 1;
             progress.transferred += 1;
             bump_percent(progress);
         }
         Some(UnisonLine::Delete(file)) => {
             progress.file = file;
+            progress.op = "delete".into();
             progress.deleted += 1;
             bump_percent(progress);
         }
@@ -367,7 +388,10 @@ fn run_unison(
         percent: 0,
         speed: String::new(),
         file: String::new(),
+        op: String::new(),
         transferred: 0,
+        added: 0,
+        modified: 0,
         deleted: 0,
         phase: "running".into(),
         message: String::new(),
@@ -425,6 +449,8 @@ fn run_unison(
     emit_progress(app, &progress);
     Ok(SyncResult {
         files: progress.transferred,
+        added: progress.added,
+        modified: progress.modified,
         deleted: progress.deleted,
         used_git,
     })
@@ -490,7 +516,10 @@ pub fn sync_project(
                     percent: 0,
                     speed: String::new(),
                     file: String::new(),
+                    op: String::new(),
                     transferred: 0,
+                    added: 0,
+                    modified: 0,
                     deleted: 0,
                     phase: "error".into(),
                     message: err.to_string(),
@@ -564,10 +593,14 @@ mod tests {
     }
 
     #[test]
-    fn parse_unison_line_reads_copy_delete_and_scan() {
+    fn parse_unison_line_reads_copy_update_delete_and_scan() {
         assert_eq!(
             parse_unison_line("[BGN] Copying src/a.ts from /local"),
             Some(UnisonLine::Copy("src/a.ts".into()))
+        );
+        assert_eq!(
+            parse_unison_line("[BGN] Updating file src/b.ts from /local to ssh://host//tmp"),
+            Some(UnisonLine::Update("src/b.ts".into()))
         );
         assert_eq!(
             parse_unison_line("[BGN] Deleting old.txt from ssh://host//tmp"),

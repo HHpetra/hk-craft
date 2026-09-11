@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { clampPercent, emptySyncProgress, syncProgressDetail, syncProgressTitle } from "./syncProgress";
+import {
+  clampPercent,
+  emptySyncProgress,
+  syncOpLabel,
+  syncProgressCounts,
+  syncProgressCurrent,
+  syncProgressDetail,
+  syncProgressTitle,
+} from "./syncProgress";
 
 describe("syncProgressTitle", () => {
   it("names running upload and download", () => {
@@ -14,17 +22,37 @@ describe("syncProgressTitle", () => {
   });
 });
 
+describe("syncOpLabel", () => {
+  it("maps unison ops", () => {
+    expect(syncOpLabel("add")).toBe("增加");
+    expect(syncOpLabel("modify")).toBe("修改");
+    expect(syncOpLabel("delete")).toBe("删除");
+    expect(syncOpLabel("")).toBe("");
+  });
+});
+
+describe("syncProgressCounts", () => {
+  it("lists add modify delete", () => {
+    expect(syncProgressCounts({ added: 2, modified: 1, deleted: 4 })).toBe(
+      "增加 2 个，修改 1 个，删除 4 个",
+    );
+  });
+});
+
 describe("syncProgressDetail", () => {
-  it("shows file, speed and counts", () => {
+  it("shows current op, file, speed and counts", () => {
     expect(
       syncProgressDetail({
         ...emptySyncProgress("p1"),
         file: "src/a.ts",
+        op: "modify",
         speed: "1.2MB/s",
-        transferred: 3,
+        transferred: 4,
+        added: 3,
+        modified: 1,
         deleted: 1,
       }),
-    ).toBe("src/a.ts · 1.2MB/s · 已传输 3 个，删除 1 个");
+    ).toBe("修改 src/a.ts · 1.2MB/s · 增加 3 个，修改 1 个，删除 1 个");
   });
 
   it("uses error message", () => {
@@ -35,6 +63,18 @@ describe("syncProgressDetail", () => {
         message: "未找到 unison，请安装 Unison 并加入 PATH",
       }),
     ).toBe("未找到 unison，请安装 Unison 并加入 PATH");
+  });
+});
+
+describe("syncProgressCurrent", () => {
+  it("prefixes the current file with its op", () => {
+    expect(
+      syncProgressCurrent({
+        ...emptySyncProgress("p1"),
+        file: "old.txt",
+        op: "delete",
+      }),
+    ).toBe("删除 old.txt");
   });
 });
 
