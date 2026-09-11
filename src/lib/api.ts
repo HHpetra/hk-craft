@@ -108,6 +108,11 @@ export function discoverAgentSessions(command: string, cwd: string) {
   }).then((rows) => rows.map((row) => ({ id: row.id, updatedMs: row.updated_ms })));
 }
 
+/** Whether `--resume <id>` can still load a stored session log for this pane. */
+export function agentSessionAvailable(command: string, cwd: string, id: string) {
+  return invoke<boolean>("agent_session_available", { command, cwd, id });
+}
+
 export function dockerListContainers() {
   return invoke<DockerContainer[]>("docker_list_containers");
 }

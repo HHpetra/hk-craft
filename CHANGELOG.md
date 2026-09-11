@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 软件设置改为左侧页签：外观、Agent、工作区、关于。
 - 同步进度按增加、修改、删除分别计数显示。
 
+### Fixed
+- 修复 dsh-tui 面板首次打开卡在 `cannot resume session` 起不来的问题：启动前先校验已存会话在本机是否仍可恢复，恢复不了就改为新会话（打开项目、点「重新启动」、切主题/预设均生效），不再把失效的 `--resume` 交给 dsh-tui。
+- 会话无法恢复、回退的新会话也起不来时，面板改为显示错误状态与提示，而不是留下一片没有重启入口的死终端。
+
 ## [0.4.0] - 2026-09-09
 
 ### Added

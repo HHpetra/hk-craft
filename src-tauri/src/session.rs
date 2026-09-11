@@ -316,6 +316,30 @@ pub fn dsh_project_key(cwd: &str) -> String {
     format!("--{slug}--")
 }
 
+/// Encode a session id as one filesystem-safe directory segment, mirroring the
+/// DSH persistence backend's `encodeSegment`: safe ASCII stays literal, every
+/// other code unit (including `~`) becomes `~XXXX`. HK-Craft decodes directory
+/// names with [`decode_dsh_segment`]; this is the inverse direction, needed to
+/// look a *stored* id up on disk again.
+fn encode_dsh_segment(raw: &str) -> String {
+    if raw == "." {
+        return "~002E".into();
+    }
+    if raw == ".." {
+        return "~002E~002E".into();
+    }
+    let mut out = String::with_capacity(raw.len());
+    for ch in raw.chars() {
+        if ch != '~' && (ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-')) {
+            out.push(ch);
+        } else {
+            out.push('~');
+            out.push_str(&format!("{:04X}", ch as u32));
+        }
+    }
+    out
+}
+
 fn decode_dsh_segment(encoded: &str) -> String {
     let mut out = String::new();
     let chars: Vec<char> = encoded.chars().collect();
@@ -483,6 +507,50 @@ pub fn discover_all(command: &str, cwd: &str) -> Vec<DiscoveredSession> {
     }
 }
 
+/// DSH stores a session's log inside its own directory; the physical name is
+/// `session.jsonl` for plaintext and `session.jsonl.zstd` when compressed.
+const DSH_LOG_NAMES: [&str; 2] = ["session.jsonl.zstd", "session.jsonl"];
+
+fn dsh_session_log_available_in(roots: &[PathBuf], cwd: &str, id: &str) -> bool {
+    let id = id.trim();
+    if id.is_empty() {
+        return false;
+    }
+    let segment = encode_dsh_segment(id);
+    let project = dsh_project_key(cwd);
+    roots.iter().any(|root| {
+        let dir = root.join(&project).join(&segment);
+        DSH_LOG_NAMES.iter().any(|name| dir.join(name).is_file())
+    })
+}
+
+/// Whether `--resume <id>` can still load a log for this command and cwd.
+///
+/// dsh-tui hard-exits instead of falling back to a fresh session when the log it
+/// is handed cannot be read (`resumeFallback`), and its lookup is rooted at the
+/// *current* project directory — a log stored under a different project key is
+/// rejected as corrupt rather than resumed, so only this cwd's directory counts.
+/// Every other agent keeps its stored id: those CLIs tolerate a vanished log.
+pub fn session_log_available(command: &str, cwd: &str, id: &str) -> bool {
+    if spec_for(command).and_then(|spec| spec.discover.as_deref()) != Some("dsh-tui") {
+        return true;
+    }
+    let Some(home) = dirs::home_dir() else {
+        return true;
+    };
+    let roots = dsh_session_roots(&home);
+    // A store that is not there at all cannot prove the log is gone.
+    if !roots.iter().any(|root| root.is_dir()) {
+        return true;
+    }
+    dsh_session_log_available_in(&roots, cwd, id)
+}
+
+#[tauri::command]
+pub fn agent_session_available(command: String, cwd: String, id: String) -> AppResult<bool> {
+    Ok(session_log_available(&command, &cwd, &id))
+}
+
 #[tauri::command]
 pub fn discover_agent_sessions(command: String, cwd: String) -> AppResult<Vec<DiscoveredSession>> {
     Ok(discover_all(&command, &cwd))
@@ -595,6 +663,44 @@ mod tests {
         let dir = root.join(dsh_project_key(cwd)).join(id);
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("session.jsonl.zstd"), id.as_bytes()).unwrap();
+    }
+
+    #[test]
+    fn dsh_segment_encode_round_trips() {
+        for raw in ["chat-1", "407ed355-921b-41a7-8fc0-cf7da588956d", "a/b", "a~b"] {
+            assert_eq!(decode_dsh_segment(&encode_dsh_segment(raw)), raw);
+        }
+        assert_eq!(encode_dsh_segment("session-1"), "session-1");
+        assert_eq!(encode_dsh_segment(".."), "~002E~002E");
+        assert_eq!(encode_dsh_segment("a/b"), "a~002Fb");
+    }
+
+    #[test]
+    fn dsh_session_log_available_requires_the_stored_artifact() {
+        let root = std::env::temp_dir().join(format!("aw-dsh-avail-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let cwd = r"C:\work\app";
+        write_dsh_session(&root, cwd, "chat-live");
+        let roots = vec![root.clone()];
+        assert!(dsh_session_log_available_in(&roots, cwd, "chat-live"));
+        assert!(!dsh_session_log_available_in(&roots, cwd, "chat-gone"));
+        // A log recorded for another directory is unresumable from this cwd.
+        assert!(!dsh_session_log_available_in(&roots, r"C:\work\other", "chat-live"));
+        // A session directory without a log is not resumable either.
+        fs::create_dir_all(root.join(dsh_project_key(cwd)).join("chat-empty")).unwrap();
+        assert!(!dsh_session_log_available_in(&roots, cwd, "chat-empty"));
+        // Plaintext logs (compression off) count as stored logs too.
+        let plain = root.join(dsh_project_key(cwd)).join("chat-plain");
+        fs::create_dir_all(&plain).unwrap();
+        fs::write(plain.join("session.jsonl"), b"{}").unwrap();
+        assert!(dsh_session_log_available_in(&roots, cwd, "chat-plain"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn unknown_agents_keep_their_stored_session_id() {
+        assert!(session_log_available("cursor-agent", r"C:\work\app", "chat-1"));
+        assert!(session_log_available("mystery", r"C:\work\app", "chat-1"));
     }
 
     #[test]

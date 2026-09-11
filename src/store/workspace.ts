@@ -13,9 +13,10 @@ import type {
   WorkspacePane,
 } from "../types";
 import { agentTargets, liveAgentTargets } from "../lib/agentProtocol";
-import { planCapturedSessions } from "../lib/agentSessionAssign";
+import { resumeCheckTargets } from "../lib/agentResumeGuard";
+import { planCapturedSessions, type SessionAssignment } from "../lib/agentSessionAssign";
 import { applySessionAssignments } from "../lib/agentSessionApply";
-import { checkDir, deleteRunnerPersist, discoverAgentSessions, dockerEnsureRunning, loadConfig, ptyKill, ptyList, ptySpawn, ptyWrite, saveConfig } from "../lib/api";
+import { agentSessionAvailable, checkDir, deleteRunnerPersist, discoverAgentSessions, dockerEnsureRunning, loadConfig, ptyKill, ptyList, ptySpawn, ptyWrite, saveConfig } from "../lib/api";
 import { dockerLaunchNotice, dockerLaunchStatus, executeDockerLaunch } from "../lib/dockerLaunch";
 import { normalizeColumnWidths } from "../lib/explorerColumns";
 import { beginPaneLaunch, cancelPaneLaunch, endPaneLaunch, requestPaneRelaunch, takePendingRelaunch } from "../lib/paneLaunchLock";
@@ -42,6 +43,7 @@ import {
   clearTerminal,
   disposeTerminal,
   hydrateLastFittedSizes,
+  isCurrentGeneration,
   lastFittedSize,
   peekLastFittedSizes,
   setSessionGeneration,
@@ -251,6 +253,41 @@ function paneStillOpen(get: WorkspaceGet, projectId: string, paneId: string) {
   return Boolean(project.panes?.some((pane) => pane.id === paneId));
 }
 
+// How long the bare respawn of an unloadable session gets to paint before the
+// pane is declared broken. dsh-tui mounts its TUI within a few seconds.
+const RESUME_FALLBACK_BOOT_MS = 12_000;
+
+/**
+ * Drop stored chat ids that no longer exist on disk, before they reach a spawn.
+ *
+ * dsh-tui hard-exits instead of starting a fresh session when `--resume` names a
+ * log it cannot read, so such an id boots the pane straight into
+ * "cannot resume session" with no TUI. Discovery already clears ids it does not
+ * list — but it is blind when `last-used.json` lost the entry or the project
+ * looks empty, and the restart path never checked at all. Clearing here lets the
+ * pane start a fresh session instead. The check fails open: when the backend
+ * cannot answer, the stored id is kept.
+ */
+async function pruneStaleResumeIds(get: WorkspaceGet, project: Project): Promise<Project> {
+  const config = get().config;
+  if (!config) return project;
+  const targets = resumeCheckTargets(project, config.agent_presets);
+  if (targets.length === 0) return project;
+  const stale: SessionAssignment[] = [];
+  for (const target of targets) {
+    const available = await agentSessionAvailable(
+      target.command,
+      project.path,
+      target.sessionId,
+    ).catch(() => true);
+    if (!available) stale.push({ projectId: project.id, paneId: target.paneId, sessionId: null });
+  }
+  if (stale.length === 0) return project;
+  await get().persist((latest) => applySessionAssignments(latest, stale) ?? latest);
+  get().setNotice("上次的 Agent 会话已不在本机，已改为新会话");
+  return get().config?.projects.find((item) => item.id === project.id) ?? project;
+}
+
 async function executeAgentOrRunnerLaunch(
   get: WorkspaceGet,
   plan: Extract<PaneLaunchPlan, { action: "spawn"; kind: "agent" | "runner" }>,
@@ -289,6 +326,25 @@ async function executeAgentOrRunnerLaunch(
     if (plan.killFirst || !reused) setSessionStatus(plan.sessionId, "running");
   };
 
+  // The bare respawn after an unloadable --resume. It is the last line of
+  // defence, so a TUI that dies before painting must surface as an error state
+  // instead of leaving the pane silently dead. The watch runs in the background:
+  // the launch itself ends as soon as the respawn is up, so a later exit is seen
+  // by the ordinary status listener too.
+  const respawnWithoutResume = async (fallback: SpawnOpts) => {
+    const second = await spawnPty(fallback);
+    markRunning(second.reused);
+    if (second.reused) return;
+    void waitResumeBootOutcome(plan.sessionId, second.generation, RESUME_FALLBACK_BOOT_MS)
+      .then((outcome) => {
+        if (outcome !== "fatal" || !paneStillOpen(get, projectId, paneId)) return;
+        if (!isCurrentGeneration(plan.sessionId, second.generation)) return;
+        setSessionStatus(plan.sessionId, "error");
+        setNotice(`${failPrefix} 启动失败：会话无法恢复，新会话也未能启动`);
+      })
+      .catch(() => undefined);
+  };
+
   try {
     const result = await spawnPty(plan.spawn);
     markRunning(result.reused);
@@ -299,17 +355,15 @@ async function executeAgentOrRunnerLaunch(
         persistClearSession();
         await clearPtySession(plan.sessionId);
         clearTerminal(plan.sessionId);
-        const second = await spawnPty(plan.resumeFallback);
-        markRunning(second.reused);
+        await respawnWithoutResume(plan.resumeFallback);
       }
     }
     return true;
   } catch (err) {
     if (plan.kind === "agent" && plan.resumeFallback) {
       try {
-        const second = await spawnPty(plan.resumeFallback);
-        markRunning(second.reused);
         persistClearSession();
+        await respawnWithoutResume(plan.resumeFallback);
         return true;
       } catch (retryErr) {
         setSessionStatus(plan.sessionId, "error");
@@ -787,7 +841,10 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
         await get().persist((current) => applySessionAssignments(current, assignments) ?? current);
       }
     }
-    const current = get().config?.projects.find((item) => item.id === project.id) ?? project;
+    const current = await pruneStaleResumeIds(
+      get,
+      get().config?.projects.find((item) => item.id === project.id) ?? project,
+    );
     const presets = get().config?.agent_presets ?? config.agent_presets;
     const launches = planProjectLaunches({
       project: current,
@@ -803,15 +860,19 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     const project = config?.projects.find((item) => item.id === projectId);
     const pane = project?.panes.find((item) => item.id === paneId);
     if (!config || !project || !pane) return;
-    const sid = paneSessionId(projectId, pane);
+    // A restart must not retry a chat id that vanished from disk in the meantime.
+    const current = await pruneStaleResumeIds(get, project);
+    const currentPane = current.panes.find((item) => item.id === paneId);
+    if (!currentPane) return;
+    const sid = paneSessionId(projectId, currentPane);
     const plan = planPaneLaunch({
       mode: "restart",
-      project,
-      pane,
-      presets: config.agent_presets,
-      resumeOnStart: config.settings.resume_on_start !== false,
+      project: current,
+      pane: currentPane,
+      presets: get().config?.agent_presets ?? config.agent_presets,
+      resumeOnStart: (get().config ?? config).settings.resume_on_start !== false,
       status: sid ? get().sessionStatus[sid] : undefined,
-      agentSeen: project.agent_seen,
+      agentSeen: current.agent_seen,
     });
     if (!plan) return;
     await executePaneLaunch(get, plan, projectId, paneId);

@@ -72,6 +72,7 @@ pub fn run() {
             docker::docker_list_containers,
             docker::docker_ensure_running,
             session::discover_agent_sessions,
+            session::agent_session_available,
             runner::delete_runner_persist,
             sync::sync_has_git,
             sync::sync_project,
