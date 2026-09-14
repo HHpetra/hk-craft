@@ -30,7 +30,7 @@
 
 ### 2.1 三位一体（The Trinity）视图模型
 每个项目（Project）在工作区内拥有独立的上下文。打开项目时默认三个面板 Tab：
-1. **📂 文件资源管理器 (File Explorer)**：主流详细列表视图（名称/修改时间/类型/大小）、路径面包屑导航、快速搜索过滤及常用外部目录书签栏。右键支持打开、在系统资源管理器中显示、复制路径 / Agent 引用、内部复制剪切粘贴、重命名、删除与新建；写操作仅限已纳管的项目根与书签目录。顶栏可按项目经 Unison 增量镜像上传 / 下载到远程电脑（设置里填主机、用户名、远程目录；本机与远程需安装匹配版本的 Unison；有 Git 则跳过 `.gitignore`）。
+1. **📂 文件资源管理器 (File Explorer)**：主流详细列表视图（名称/修改时间/类型/大小）、路径面包屑导航、快速搜索过滤及常用外部目录书签栏。右键支持打开、在系统资源管理器中显示、复制路径 / Agent 引用、内部复制剪切粘贴、重命名、删除与新建；写操作仅限已纳管的项目根与书签目录。顶栏可按项目经 Unison 增量镜像上传 / 下载到远程电脑（设置里填主机、用户名与远程目录；本机与远程需安装匹配版本的 Unison；有 Git 则跳过 `.gitignore`）。同步前先预览目标端将被覆盖或删除的文件，确认后在同一轮 Unison 进程里传播（取消或关闭面板会中止挂起的预览）。
 2. **🤖 Agent 终端 (Agent CLI)**：专用于运行 `cursor-agent`、`opencode`、`claude`、`codex`、`dsh-tui` 等 CLI 交互；默认使用项目绑定的 Agent 预设，也可再开与默认不同的 Agent 面板。
 3. **⚡ 运行终端 (Runner Terminal)**：纯净的系统 Shell，用于本地测试、编译、开发服务器运行。
 
@@ -46,7 +46,7 @@
 
 ### 2.3 PTY 会话常驻与生命周期 (Session Persistence)
 - PTY 进程完全运行并驻留在 Rust 后端。
-- 前端切换左侧项目、切换 Tab/布局仅改变 DOM 挂载或可见性，**绝对不可销毁后台 PTY 进程或丢失终端输出缓冲区**。
+- 前端切换左侧项目、切换 Tab/布局仅改变 DOM 挂载或可见性，**绝对不可销毁后台 PTY 进程或丢失终端输出缓冲区**。切换深浅主题会重启已打开的 Agent 与 Runner 面板，以便注入对应的 `TERM_THEME` / `COLORFGBG`（Docker 不重启）；同时由 Rust 立即回答 OSC 10/11 颜色查询，并向已订阅 DEC 2031 的会话推 CSI 997，使 OpenCode 跟随界面深浅色。
 - 左侧项目可收纳：收纳会关闭该项目本轮 PTY，但保留布局、Agent session 与 Runner 历史；彻底移除只从收纳区执行。
 - OpenCode 面板通过全局惰性插件（`~/.config/opencode/plugins/hk-craft.js`）上报顶层 session id，写入该面板的 `agent_session_id`。关项目后再开时还会按项目目录只读扫描 `~/.local/share/opencode/opencode.db`（可用 `XDG_DATA_HOME` / `OPENCODE_DB` 覆盖），把未绑定的根会话填进空面板，再用 `opencode --session <id>` 续跑。插件没有 HK-Craft 注入的环境变量时不生效。
 - Runner / Docker 底部可保存项目常用命令：左键写入当前 PTY（末尾 Enter），顺序与正文按项目写入 `config.toml`。同一项目的 Runner 与 Docker 面板共用这份列表。

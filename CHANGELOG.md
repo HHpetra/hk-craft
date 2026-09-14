@@ -11,11 +11,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - 文件资源管理器列表列宽可拖拽调整；所有资源管理器共用同一组列宽，重启后保持。
-- 按项目配置远程主机后，资源管理器顶栏可经 Unison 增量镜像上传 / 下载（有进度弹窗）；有 Git 时跳过 `.gitignore`，没有则全量同步并先确认。
+- 按项目配置远程主机后，资源管理器顶栏可经 Unison 增量镜像上传 / 下载（有进度弹窗）；同步前预览目标端将覆盖 / 删除的文件并确认。有 Git 时跳过 `.gitignore`，没有则全量同步。
 
 ### Changed
+- 切换深浅主题时同步重启已打开的 Runner 面板，使 `TERM_THEME` / `COLORFGBG` 与界面主题一致。
+- PTY 在读线程立即回答 OSC 10/11 与 DEC 2031，OpenCode/OpenTUI 跟随 HK-Craft 深浅色；切主题会向已订阅会话推 CSI 997。
 - 软件设置改为左侧页签：外观、Agent、工作区、关于。
 - 同步进度按增加、修改、删除分别计数显示。
+- Windows 安装包只发布 NSIS（`HK-Craft_x.y.z_x64-setup.exe`）；完成页可取消桌面快捷方式。
+- Unison 同步预览与传输共用同一进程（确认后继续传播，取消会中止挂起会话）；SSH 复用连接，并启用 fastcheck / compress（新版 Unison 另开并行传输）。
 
 ### Fixed
 - 修复 dsh-tui 面板首次打开卡在 `cannot resume session` 起不来的问题：启动前先校验已存会话在本机是否仍可恢复，恢复不了就改为新会话（打开项目、点「重新启动」、切主题/预设均生效），不再把失效的 `--resume` 交给 dsh-tui。
