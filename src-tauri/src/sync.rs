@@ -828,6 +828,7 @@ fn unison_command(
         .arg("-dumbtty")
         .arg("-fastcheck")
         .arg("true")
+        .arg("-ignorearchives")
         .arg("-force")
         .arg(&force)
         .arg("-sshargs")
@@ -1501,6 +1502,28 @@ mod tests {
         assert_eq!(unison_maxthreads_arg(Some((2, 53))), Some(4));
         assert_eq!(unison_maxthreads_arg(Some((3, 0))), Some(4));
         assert_eq!(unison_maxthreads_arg(None), None);
+    }
+
+    #[test]
+    fn unison_command_ignores_archives_in_preview_and_batch() {
+        let root = std::env::temp_dir();
+        let remote = RemoteTarget {
+            host: "10.0.0.2".into(),
+            user: "dev".into(),
+            path: "/tmp/p".into(),
+        };
+        let args = |batch: bool| -> Vec<String> {
+            unison_command(&root, &remote, SyncDirection::Upload, false, batch)
+                .get_args()
+                .map(|arg| arg.to_string_lossy().into_owned())
+                .collect()
+        };
+        let preview = args(false);
+        assert!(preview.iter().any(|arg| arg == "-ignorearchives"));
+        assert!(!preview.iter().any(|arg| arg == "-batch"));
+        let batch = args(true);
+        assert!(batch.iter().any(|arg| arg == "-ignorearchives"));
+        assert!(batch.iter().any(|arg| arg == "-batch"));
     }
 
     #[test]
