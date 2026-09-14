@@ -16,7 +16,7 @@ import { agentTargets, liveAgentTargets } from "../lib/agentProtocol";
 import { resumeCheckTargets } from "../lib/agentResumeGuard";
 import { planCapturedSessions, type SessionAssignment } from "../lib/agentSessionAssign";
 import { applySessionAssignments } from "../lib/agentSessionApply";
-import { agentSessionAvailable, checkDir, deleteRunnerPersist, discoverAgentSessions, dockerEnsureRunning, loadConfig, ptyKill, ptyList, ptySpawn, ptyWrite, saveConfig } from "../lib/api";
+import { agentSessionAvailable, checkDir, deleteRunnerPersist, discoverAgentSessions, dockerEnsureRunning, loadConfig, ptyKill, ptyList, ptySetTheme, ptySpawn, ptyWrite, saveConfig } from "../lib/api";
 import { dockerLaunchNotice, dockerLaunchStatus, executeDockerLaunch } from "../lib/dockerLaunch";
 import { normalizeColumnWidths } from "../lib/explorerColumns";
 import { beginPaneLaunch, cancelPaneLaunch, endPaneLaunch, requestPaneRelaunch, takePendingRelaunch } from "../lib/paneLaunchLock";
@@ -918,6 +918,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     if (!config) return;
     applyDocumentTheme(theme);
     await get().persist((latest) => patchSettings(latest, { theme: normalizeTheme(theme) }));
+    await ptySetTheme(theme).catch(() => undefined);
     restartAgentTargets(get, { kind: "theme" });
   },
 

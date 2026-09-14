@@ -361,7 +361,10 @@ describe("agentPanesToRestart", () => {
   const agentA: WorkspacePane = { id: "a1", kind: "agent", preset_id: "cursor" };
   const agentB: WorkspacePane = { id: "a2", kind: "agent", preset_id: "oc" };
   const runner: WorkspacePane = { id: "r1", kind: "runner" };
-  const open = project({ id: "open", panes: [agentA, agentB, runner] });
+  const open = project({
+    id: "open",
+    panes: [agentA, agentB, runner, explorerPane, dockerPane],
+  });
   const closed = project({ id: "closed", panes: [agentA] });
 
   it("restarts only opened agent panes whose resolved command changed", () => {
@@ -374,11 +377,12 @@ describe("agentPanesToRestart", () => {
     expect(refs).toEqual([{ projectId: "open", paneId: "a1" }]);
   });
 
-  it("restarts every opened agent pane on theme change", () => {
+  it("restarts every opened agent and runner pane on theme change", () => {
     const refs = agentPanesToRestart(["open"], [open, closed], { kind: "theme" });
     expect(refs).toEqual([
       { projectId: "open", paneId: "a1" },
       { projectId: "open", paneId: "a2" },
+      { projectId: "open", paneId: "r1" },
     ]);
   });
 });

@@ -10,7 +10,7 @@ import { SESSION_KINDS } from "./paneCaps";
 import { shouldCopySelection } from "./terminalCopy";
 import { clientToCell, hostMouseUpAction, isDragGesture, sgrClick, sgrMouse, wheelButton } from "./sgrMouse";
 import { createMouseStripper } from "./stripMouseTracking";
-import { hexToOscRgb, normalizeTheme, xtermThemes, type XtermTheme } from "./theme";
+import { normalizeTheme, xtermThemes } from "./theme";
 import { primaryTerminalFont, setPreferredTerminalFont, terminalFontFamily } from "./terminalFonts";
 import type { PtyExit, PtyOutput, SessionKind } from "../types";
 
@@ -31,18 +31,9 @@ type CoreViewport = {
   viewport?: { scrollBarWidth?: number };
 };
 
-function bindOscColorQuery(sessionId: string, term: Terminal, theme: XtermTheme): IDisposable[] {
-  const reply = (code: number, color: string) => {
-    void ptyWrite(sessionId, `\x1b]${code};${hexToOscRgb(color)}\x1b\\`).catch(() => undefined);
-  };
-  const handle = (code: number, color: string) =>
-    term.parser.registerOscHandler(code, (data) => {
-      if (data === "?" || data.startsWith("?")) {
-        reply(code, color);
-      }
-      return true;
-    });
-  return [handle(10, theme.foreground), handle(11, theme.background)];
+function bindOscColorQuery(term: Terminal): IDisposable[] {
+  const swallow = () => true;
+  return [term.parser.registerOscHandler(10, swallow), term.parser.registerOscHandler(11, swallow)];
 }
 
 function refreshWhenFontsReady(term: Terminal) {
@@ -267,7 +258,7 @@ function buildTerminal(sessionId: string): RegistryEntry {
   host.style.padding = "8px";
   host.style.boxSizing = "border-box";
   host.style.overflow = "hidden";
-  const osc = bindOscColorQuery(sessionId, term, theme);
+  const osc = bindOscColorQuery(term);
   term.onData((data) => {
     void ptyWrite(sessionId, data).catch(() => undefined);
   });
@@ -487,8 +478,6 @@ export function applyRegisteredXtermTheme(theme: string) {
   const next = xtermThemes[normalizeTheme(theme)];
   for (const entry of registry.values()) {
     entry.term.options.theme = next;
-    for (const d of entry.osc) d.dispose();
-    entry.osc = bindOscColorQuery(entry.sessionId, entry.term, next);
   }
 }
 

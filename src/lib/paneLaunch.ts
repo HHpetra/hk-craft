@@ -155,11 +155,14 @@ export function agentPanesToRestart(
   for (const project of projects) {
     if (!opened.has(project.id)) continue;
     for (const pane of project.panes ?? []) {
-      if (pane.kind !== "agent") continue;
       if (reason.kind === "theme") {
-        refs.push({ projectId: project.id, paneId: pane.id });
+        // Agent and Runner inherit TERM_THEME / COLORFGBG at spawn.
+        if (pane.kind === "agent" || pane.kind === "runner") {
+          refs.push({ projectId: project.id, paneId: pane.id });
+        }
         continue;
       }
+      if (pane.kind !== "agent") continue;
       const prevCmd = resolvePresetCommand(pane, project, reason.prevPresets);
       const nextCmd = resolvePresetCommand(pane, project, reason.nextPresets);
       if (prevCmd !== nextCmd) {

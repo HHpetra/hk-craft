@@ -93,6 +93,10 @@ export function ptyKill(sessionId: string) {
   return invoke<void>("pty_kill", { sessionId });
 }
 
+export function ptySetTheme(theme: string) {
+  return invoke<void>("pty_set_theme", { theme });
+}
+
 export function ptyList() {
   return invoke<string[]>("pty_list");
 }

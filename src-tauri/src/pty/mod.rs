@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::io::{Read, Write};
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -13,6 +14,7 @@ use crate::error::{AppError, AppResult};
 use crate::AppState;
 
 mod stats;
+mod theme_reply;
 
 #[derive(Serialize, Clone)]
 pub struct PtyOutput {
@@ -55,6 +57,8 @@ struct PtySession {
     master: Mutex<Box<dyn MasterPty + Send>>,
     child: Mutex<Box<dyn portable_pty::Child + Send + Sync>>,
     generation: u64,
+    colors: Mutex<theme_reply::ThemeColors>,
+    mode_2031: AtomicBool,
 }
 
 pub struct PtyManager {
@@ -227,6 +231,8 @@ impl PtyManager {
             master: Mutex::new(pair.master),
             child: Mutex::new(child),
             generation,
+            colors: Mutex::new(theme_reply::colors_for(theme)),
+            mode_2031: AtomicBool::new(false),
         });
 
         self.sessions
@@ -236,16 +242,19 @@ impl PtyManager {
 
         let emit_id = session_id.clone();
         let emit_gen = generation;
+        let reader_session = Arc::clone(&session);
         thread::Builder::new()
             .name(format!("pty-read-{session_id}"))
             .spawn(move || {
                 let mut buf = [0u8; 8192];
                 let mut leftover = Vec::new();
+                let mut theme_state = theme_reply::ThemeReplyState::default();
                 loop {
                     match reader.read(&mut buf) {
                         Ok(0) => {
                             if !leftover.is_empty() {
                                 let data = String::from_utf8_lossy(&leftover).into_owned();
+                                reply_theme_queries(&reader_session, &data, &mut theme_state);
                                 let _ = app.emit(
                                     "pty-output",
                                     PtyOutput {
@@ -263,6 +272,7 @@ impl PtyManager {
                             if data.is_empty() {
                                 continue;
                             }
+                            reply_theme_queries(&reader_session, &data, &mut theme_state);
                             let _ = app.emit(
                                 "pty-output",
                                 PtyOutput {
@@ -337,6 +347,48 @@ impl PtyManager {
             let _ = child.wait();
         }
         Ok(())
+    }
+
+    pub fn set_theme(&self, theme: &str) {
+        let colors = theme_reply::colors_for(theme);
+        let seed = theme_reply::csi_997(colors.light);
+        let sessions: Vec<Arc<PtySession>> = self
+            .sessions
+            .lock()
+            .expect("pty lock")
+            .values()
+            .cloned()
+            .collect();
+        for session in sessions {
+            *session.colors.lock().expect("colors lock") = colors;
+            if !session.mode_2031.load(Ordering::Relaxed) {
+                continue;
+            }
+            if let Ok(mut writer) = session.writer.lock() {
+                let _ = writer.write_all(seed.as_bytes());
+                let _ = writer.flush();
+            }
+        }
+    }
+}
+
+fn reply_theme_queries(
+    session: &PtySession,
+    data: &str,
+    theme_state: &mut theme_reply::ThemeReplyState,
+) {
+    let colors = *session.colors.lock().expect("colors lock");
+    theme_state.mode_2031 = session.mode_2031.load(Ordering::Relaxed);
+    let replies = theme_reply::scan_theme_queries(data, colors, theme_state);
+    session
+        .mode_2031
+        .store(theme_state.mode_2031, Ordering::Relaxed);
+    if replies.is_empty() {
+        return;
+    }
+    if let Ok(mut writer) = session.writer.lock() {
+        let _ = writer.write_all(replies.as_bytes());
+        let _ = writer.flush();
     }
 }
 
@@ -678,6 +730,12 @@ pub fn pty_resize(
 #[tauri::command]
 pub fn pty_kill(state: State<'_, AppState>, session_id: String) -> AppResult<()> {
     state.pty.kill(&session_id)
+}
+
+#[tauri::command]
+pub fn pty_set_theme(state: State<'_, AppState>, theme: String) -> AppResult<()> {
+    state.pty.set_theme(&theme);
+    Ok(())
 }
 
 #[tauri::command]
