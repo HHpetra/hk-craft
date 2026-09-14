@@ -25,7 +25,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": "nsis",
     "publisher": "Hongshan Tech",
     "copyright": "Copyright © 2026 Hongshan Tech",
     "shortDescription": "Trinity Desktop Workbench for CLI AI Agents",

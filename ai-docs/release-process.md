@@ -18,7 +18,7 @@
 文档：
 
 - `CHANGELOG.md`：在顶部新增 `## [x.y.z] - YYYY-MM-DD`，按 Added / Changed / Fixed 写本版本变更。
-- `README.md`：更新安装包文件名，例如 `HK-Craft_0.2.0_x64-setup.exe` 与 `HK-Craft_0.2.0_x64_en-US.msi`。
+- `README.md`：更新安装包文件名，例如 `HK-Craft_0.2.0_x64-setup.exe`。
 
 不要改旧版本的 Git 标签或已发布的 GitHub Release。
 
@@ -40,7 +40,6 @@ pnpm tauri build
 `pnpm build` 同样会调用 `tauri build`。预期产物：
 
 - `src-tauri/target/release/bundle/nsis/HK-Craft_x.y.z_x64-setup.exe`
-- `src-tauri/target/release/bundle/msi/HK-Craft_x.y.z_x64_en-US.msi`
 
 抽查 `dist/assets/index-*.js` 是否包含新版本号和当前短 hash。
 
@@ -54,12 +53,11 @@ git push origin vx.y.z
 
 ## 4. 创建 GitHub Release
 
-本机需能访问 GitHub（Git Credential Manager 或已登录的 `gh`）。用 Changelog 中本版本段落作为说明，上传两个安装包：
+本机需能访问 GitHub（Git Credential Manager 或已登录的 `gh`）。用 Changelog 中本版本段落作为说明，上传 NSIS 安装包：
 
 ```bash
 gh release create vx.y.z --repo HHpetra/hk-craft --title "HK-Craft vx.y.z" --notes-file <changelog-excerpt> ^
-  src-tauri/target/release/bundle/nsis/HK-Craft_x.y.z_x64-setup.exe ^
-  src-tauri/target/release/bundle/msi/HK-Craft_x.y.z_x64_en-US.msi
+  src-tauri/target/release/bundle/nsis/HK-Craft_x.y.z_x64-setup.exe
 ```
 
 若 `gh` 未登录，可用 Git Credential Manager 取出的 token 设置 `GH_TOKEN` 后再执行同一条命令。不要在日志或聊天里打印 token。
@@ -69,5 +67,5 @@ gh release create vx.y.z --repo HHpetra/hk-craft --title "HK-Craft vx.y.z" --not
 ## 5. 发布后核对
 
 - 仓库 `master` 与标签 `vx.y.z` 都已在远程。
-- Release 附件包含 NSIS 与 MSI。
+- Release 附件包含 NSIS 安装包。
 - 安装后设置页底部显示新版本号与发布提交的短 hash；打开设置应提示「已是最新」。
