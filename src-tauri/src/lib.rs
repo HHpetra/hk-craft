@@ -22,6 +22,7 @@ pub struct AppState {
     pub config: Mutex<AppConfig>,
     pub config_path: PathBuf,
     pub pty: Arc<PtyManager>,
+    pub sync: Arc<sync::SyncHost>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -45,6 +46,7 @@ pub fn run() {
                 config: Mutex::new(cfg),
                 config_path,
                 pty,
+                sync: Arc::new(sync::SyncHost::new()),
             });
             Ok(())
         })
@@ -76,6 +78,9 @@ pub fn run() {
             runner::delete_runner_persist,
             sync::sync_has_git,
             sync::sync_project,
+            sync::sync_preview,
+            sync::sync_confirm,
+            sync::sync_abort,
             update::fetch_latest_release_tag,
         ])
         .run(tauri::generate_context!())

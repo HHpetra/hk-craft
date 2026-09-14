@@ -1,5 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { remoteSyncConfigured, syncConfirmCopy, syncDoneNotice } from "./remoteSync";
+import {
+  emptySyncPreview,
+  listedPreviewPaths,
+  previewHasChanges,
+  previewIsDangerous,
+  remoteSyncConfigured,
+  SYNC_CONFIRM_LIST_LIMIT,
+  syncConfirmCopy,
+  syncDoneNotice,
+} from "./remoteSync";
+import type { SyncPreview } from "../types";
+
+function preview(partial: Partial<SyncPreview>): SyncPreview {
+  return { ...emptySyncPreview(partial.used_git ?? false), ...partial };
+}
 
 describe("remoteSyncConfigured", () => {
   it("requires all three fields", () => {
@@ -12,31 +26,72 @@ describe("remoteSyncConfigured", () => {
 });
 
 describe("syncConfirmCopy", () => {
-  it("warns less for git upload", () => {
-    expect(syncConfirmCopy("upload", true)).toEqual({
-      title: "上传到远程",
-      message: "将把本地项目镜像到远程电脑。远程上多出的文件会被删除；.gitignore 中的文件不会上传。",
-      danger: false,
-    });
+  it("marks overwrite or delete as danger for upload", () => {
+    const copy = syncConfirmCopy(
+      "upload",
+      preview({
+        used_git: true,
+        modified: ["src/a.ts"],
+        modified_count: 1,
+        deleted: ["old.md"],
+        deleted_count: 1,
+      }),
+    );
+    expect(copy.danger).toBe(true);
+    expect(copy.empty).toBe(false);
+    expect(copy.title).toBe("上传到远程");
+    expect(copy.message).toContain("覆盖 1 个，删除 1 个");
+    expect(copy.message).toContain("远程上被覆盖或删除的文件无法撤销");
+    expect(copy.message).toContain("已按 .gitignore 排除");
   });
 
-  it("marks no-git upload as danger", () => {
-    const copy = syncConfirmCopy("upload", false);
+  it("is not danger when upload only adds files", () => {
+    const copy = syncConfirmCopy(
+      "upload",
+      preview({ used_git: true, added: ["src/new.ts"], added_count: 1 }),
+    );
+    expect(copy.danger).toBe(false);
+    expect(copy.empty).toBe(false);
+    expect(copy.message).toContain("增加 1 个");
+    expect(copy.message).not.toContain("无法撤销");
+  });
+
+  it("marks empty preview as close-only", () => {
+    const copy = syncConfirmCopy("upload", emptySyncPreview(true));
+    expect(copy.empty).toBe(true);
+    expect(copy.danger).toBe(false);
+    expect(copy.message).toBe("没有需要同步的变更。");
+  });
+
+  it("warns local files for download", () => {
+    const copy = syncConfirmCopy(
+      "download",
+      preview({
+        used_git: false,
+        deleted: ["local-only.ts"],
+        deleted_count: 1,
+      }),
+    );
+    expect(copy.title).toBe("从远程下载");
     expect(copy.danger).toBe(true);
+    expect(copy.message).toContain("本地上被覆盖或删除的文件无法撤销");
     expect(copy.message).toContain("不会按 .gitignore 排除");
   });
+});
 
-  it("marks git download as danger", () => {
-    const copy = syncConfirmCopy("download", true);
-    expect(copy.danger).toBe(true);
-    expect(copy.message).toContain(".gitignore 内的除外");
+describe("preview helpers", () => {
+  it("detects changes and danger", () => {
+    expect(previewHasChanges(emptySyncPreview())).toBe(false);
+    expect(previewIsDangerous(preview({ added_count: 2 }))).toBe(false);
+    expect(previewIsDangerous(preview({ modified_count: 1 }))).toBe(true);
+    expect(previewIsDangerous(preview({ deleted_count: 1 }))).toBe(true);
   });
 
-  it("marks no-git download as danger and full copy", () => {
-    const copy = syncConfirmCopy("download", false);
-    expect(copy.danger).toBe(true);
-    expect(copy.message).toContain("不会按 .gitignore 排除");
-    expect(copy.message).toContain("本地多出的文件会被删除");
+  it("caps listed paths and reports hidden count", () => {
+    const paths = Array.from({ length: 35 }, (_, i) => `f${i}.ts`);
+    const listed = listedPreviewPaths(paths, 40);
+    expect(listed.shown).toHaveLength(SYNC_CONFIRM_LIST_LIMIT);
+    expect(listed.hidden).toBe(10);
   });
 });
 

@@ -92,6 +92,16 @@ export interface SyncResult {
   used_git: boolean;
 }
 
+export interface SyncPreview {
+  used_git: boolean;
+  added: string[];
+  modified: string[];
+  deleted: string[];
+  added_count: number;
+  modified_count: number;
+  deleted_count: number;
+}
+
 export type SyncPhase = "running" | "done" | "error";
 
 export type SyncFileOp = "add" | "modify" | "delete" | "";

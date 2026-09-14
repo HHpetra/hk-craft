@@ -12,15 +12,16 @@ import {
   fsOpen,
   fsRename,
   fsReveal,
-  syncHasGit,
-  syncProject,
+  syncAbort,
+  syncConfirm,
+  syncPreview,
 } from "../../lib/api";
 import { clearFsClipboard, getFsClipboard, setFsClipboard, subscribeFsClipboard } from "../../lib/fsClipboard";
 import { fileName, isValidFileName, joinDir, parentDir, uniqueName } from "../../lib/fsNames";
 import { beginPathDrag } from "../../lib/dnd";
 import { minColumnPct, normalizeColumnWidths, resizeAdjacent } from "../../lib/explorerColumns";
 import { deleteConfirmCopy } from "../../lib/explorerDelete";
-import { remoteSyncConfigured, syncConfirmCopy, syncDoneNotice } from "../../lib/remoteSync";
+import { previewHasChanges, remoteSyncConfigured, syncDoneNotice } from "../../lib/remoteSync";
 import { emptySyncProgress } from "../../lib/syncProgress";
 import {
   applyClear,
@@ -31,10 +32,11 @@ import {
   type ExplorerSelection,
 } from "../../lib/explorerSelect";
 import { breadcrumbParts, cn, formatAgentInject, formatSize, formatTime, pathsEqual } from "../../lib/format";
-import type { Bookmark, ExplorerView, FileEntry, Project, SyncDirection, SyncProgress } from "../../types";
+import type { Bookmark, ExplorerView, FileEntry, Project, SyncDirection, SyncPreview, SyncProgress } from "../../types";
 import { useWorkspace } from "../../store/workspace";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { ExplorerContextMenu, type ExplorerMenuAction, type ExplorerMenuState } from "./ExplorerContextMenu";
+import { SyncConfirmDialog, SyncScanDialog } from "./SyncConfirmDialog";
 import { SyncProgressDialog } from "./SyncProgressDialog";
 
 type SortKey = "name" | "modified" | "kind" | "size";
@@ -131,11 +133,11 @@ export function FileExplorer({ project, paneId }: { project: Project; paneId: st
   const [renaming, setRenaming] = useState<string | null>(null);
   const [menu, setMenu] = useState<ExplorerMenuState | null>(null);
   const [pendingDelete, setPendingDelete] = useState<FileEntry[] | null>(null);
-  const [pendingSync, setPendingSync] = useState<SyncDirection | null>(null);
+  const [scanningSync, setScanningSync] = useState<SyncDirection | null>(null);
+  const [syncPreviewResult, setSyncPreviewResult] = useState<SyncPreview | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [syncProgress, setSyncProgress] = useState<SyncProgress | null>(null);
   const [activeSync, setActiveSync] = useState<SyncDirection | null>(null);
-  const [hasGit, setHasGit] = useState(false);
   const [clip, setClip] = useState(getFsClipboard);
   const paneRef = useRef<HTMLDivElement>(null);
   const tableRef = useRef<HTMLTableElement>(null);
@@ -149,11 +151,19 @@ export function FileExplorer({ project, paneId }: { project: Project; paneId: st
   } | null>(null);
   const requestRemoveRef = useRef<(items?: FileEntry[]) => void>(() => undefined);
   const deleteBlockedRef = useRef(false);
+  const parkedSyncRef = useRef(false);
   columnWidthsRef.current = columnWidths;
 
   const agentPrefix = presets.find((preset) => preset.id === project.agent_preset)?.drag_prefix ?? "@";
 
   useEffect(() => subscribeFsClipboard(setClip), []);
+
+  useEffect(() => {
+    return () => {
+      parkedSyncRef.current = false;
+      void syncAbort(project.id);
+    };
+  }, [project.id]);
 
   useEffect(() => {
     if (!project) {
@@ -165,24 +175,6 @@ export function FileExplorer({ project, paneId }: { project: Project; paneId: st
     setRoot(project.path);
     setRootLabel("项目根");
     setCurrent(project.path);
-  }, [project?.id, project?.path]);
-
-  useEffect(() => {
-    if (!project?.id) {
-      setHasGit(false);
-      return;
-    }
-    let cancelled = false;
-    void syncHasGit(project.id)
-      .then((value) => {
-        if (!cancelled) setHasGit(value);
-      })
-      .catch(() => {
-        if (!cancelled) setHasGit(false);
-      });
-    return () => {
-      cancelled = true;
-    };
   }, [project?.id, project?.path]);
 
   const reload = useCallback(async () => {
@@ -241,11 +233,50 @@ export function FileExplorer({ project, paneId }: { project: Project; paneId: st
   const canPaste = Boolean(clip?.items.length);
   const deleteCopy = pendingDelete ? deleteConfirmCopy(pendingDelete) : null;
   const remoteReady = remoteSyncConfigured(project);
-  const syncCopy = pendingSync ? syncConfirmCopy(pendingSync, hasGit) : null;
   const remoteHint = "请先在设置中填写该项目的远程主机、用户名与目录";
+  const syncBusy = syncing || Boolean(syncProgress) || Boolean(scanningSync);
+
+  async function startSyncPreview(direction: SyncDirection) {
+    if (syncBusy || !remoteReady) return;
+    setScanningSync(direction);
+    setSyncPreviewResult(null);
+    parkedSyncRef.current = false;
+    try {
+      const preview = await syncPreview(project.id, direction);
+      const parked = previewHasChanges(preview);
+      parkedSyncRef.current = parked;
+      setSyncPreviewResult(preview);
+    } catch (err) {
+      parkedSyncRef.current = false;
+      setNotice(String(err));
+      setScanningSync(null);
+      setSyncPreviewResult(null);
+    }
+  }
+
+  function clearPreviewUi() {
+    setScanningSync(null);
+    setSyncPreviewResult(null);
+  }
+
+  function cancelSyncPreview() {
+    parkedSyncRef.current = false;
+    clearPreviewUi();
+    void syncAbort(project.id);
+  }
+
+  function confirmSyncPreview() {
+    if (!scanningSync || !syncPreviewResult || !previewHasChanges(syncPreviewResult)) {
+      cancelSyncPreview();
+      return;
+    }
+    const direction = scanningSync;
+    parkedSyncRef.current = false;
+    clearPreviewUi();
+    void runRemoteSync(direction);
+  }
 
   async function runRemoteSync(direction: SyncDirection) {
-    setPendingSync(null);
     if (syncing || syncProgress || !remoteReady) return;
     setSyncing(true);
     setActiveSync(direction);
@@ -255,7 +286,7 @@ export function FileExplorer({ project, paneId }: { project: Project; paneId: st
       setSyncProgress(event.payload);
     });
     try {
-      const result = await syncProject(project.id, direction);
+      const result = await syncConfirm(project.id, direction);
       setSyncProgress((prev) => ({
         ...(prev ?? emptySyncProgress(project.id)),
         phase: "done",
@@ -403,7 +434,7 @@ export function FileExplorer({ project, paneId }: { project: Project; paneId: st
   }
 
   requestRemoveRef.current = requestRemove;
-  deleteBlockedRef.current = Boolean(pendingDelete || pendingSync || syncProgress || renaming);
+  deleteBlockedRef.current = Boolean(pendingDelete || scanningSync || syncProgress || renaming);
 
   useEffect(() => {
     if (project.active_pane_id !== paneId) return;
@@ -527,7 +558,7 @@ export function FileExplorer({ project, paneId }: { project: Project; paneId: st
   }
 
   function onPaneKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    if (isTypingTarget(event.target) || pendingDelete || pendingSync || syncProgress) return;
+    if (isTypingTarget(event.target) || pendingDelete || scanningSync || syncProgress) return;
     if (event.key === "F2") {
       event.preventDefault();
       if (focus && selection.selected.has(focus)) setRenaming(focus);
@@ -668,18 +699,18 @@ export function FileExplorer({ project, paneId }: { project: Project; paneId: st
             <button
               type="button"
               title={remoteReady ? "上传到远程" : remoteHint}
-              disabled={!remoteReady || syncing || Boolean(syncProgress)}
+              disabled={!remoteReady || syncBusy}
               className="rounded p-1 text-ink-subtle hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
-              onClick={() => setPendingSync("upload")}
+              onClick={() => void startSyncPreview("upload")}
             >
               <Upload size={14} />
             </button>
             <button
               type="button"
               title={remoteReady ? "从远程下载" : remoteHint}
-              disabled={!remoteReady || syncing || Boolean(syncProgress)}
+              disabled={!remoteReady || syncBusy}
               className="rounded p-1 text-ink-subtle hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
-              onClick={() => setPendingSync("download")}
+              onClick={() => void startSyncPreview("download")}
             >
               <Download size={14} />
             </button>
@@ -860,14 +891,13 @@ export function FileExplorer({ project, paneId }: { project: Project; paneId: st
           onConfirm={() => void confirmRemove()}
         />
       )}
-      {pendingSync && syncCopy && (
-        <ConfirmDialog
-          title={syncCopy.title}
-          message={syncCopy.message}
-          confirmLabel={pendingSync === "upload" ? "上传" : "下载"}
-          danger={syncCopy.danger}
-          onCancel={() => setPendingSync(null)}
-          onConfirm={() => void runRemoteSync(pendingSync)}
+      {scanningSync && !syncPreviewResult && <SyncScanDialog direction={scanningSync} />}
+      {scanningSync && syncPreviewResult && (
+        <SyncConfirmDialog
+          direction={scanningSync}
+          preview={syncPreviewResult}
+          onCancel={cancelSyncPreview}
+          onConfirm={confirmSyncPreview}
         />
       )}
       {activeSync && syncProgress && (
