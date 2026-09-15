@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-15
+
 ### Added
 - 文件资源管理器列表列宽可拖拽调整；所有资源管理器共用同一组列宽，重启后保持。
 - 按项目配置远程主机后，资源管理器顶栏可经 Unison 增量镜像上传 / 下载（有进度弹窗）；同步前预览目标端将覆盖 / 删除的文件并确认。有 Git 时跳过 `.gitignore`，没有则全量同步。
@@ -17,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 切换深浅主题时同步重启已打开的 Runner 面板，使 `TERM_THEME` / `COLORFGBG` 与界面主题一致。
 - PTY 在读线程立即回答 OSC 10/11 与 DEC 2031，OpenCode/OpenTUI 跟随 HK-Craft 深浅色；切主题会向已订阅会话推 CSI 997。
 - 软件设置改为左侧页签：外观、Agent、工作区、关于。
-- 同步进度按增加、修改、删除分别计数显示。
+- 同步进度按增加、修改、删除分别计数显示；传输过程以可滚动多行日志列出已处理文件。
 - Windows 安装包只发布 NSIS（`HK-Craft_x.y.z_x64-setup.exe`）；完成页可取消桌面快捷方式。
 - Unison 同步预览与传输共用同一进程（确认后继续传播，取消会中止挂起会话）；SSH 复用连接，并启用 fastcheck / compress（新版 Unison 另开并行传输）。
 
