@@ -827,7 +827,7 @@ fn unison_command(
         .arg("text")
         .arg("-dumbtty")
         .arg("-fastcheck")
-        .arg("true")
+        .arg("false")
         .arg("-ignorearchives")
         .arg("-force")
         .arg(&force)
@@ -1524,6 +1524,25 @@ mod tests {
         let batch = args(true);
         assert!(batch.iter().any(|arg| arg == "-ignorearchives"));
         assert!(batch.iter().any(|arg| arg == "-batch"));
+    }
+
+    #[test]
+    fn unison_command_compares_contents_not_timestamps() {
+        let root = std::env::temp_dir();
+        let remote = RemoteTarget {
+            host: "10.0.0.2".into(),
+            user: "dev".into(),
+            path: "/tmp/p".into(),
+        };
+        let args: Vec<String> =
+            unison_command(&root, &remote, SyncDirection::Upload, false, true)
+                .get_args()
+                .map(|arg| arg.to_string_lossy().into_owned())
+                .collect();
+        assert!(args
+            .windows(2)
+            .any(|pair| pair[0] == "-fastcheck" && pair[1] == "false"));
+        assert!(!args.iter().any(|arg| arg == "-fastercheckUNSAFE"));
     }
 
     #[test]
