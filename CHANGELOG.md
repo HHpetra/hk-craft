@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- 启动后若有新版本，底部弹出提示卡片，可前往 GitHub Releases 下载。
+
+### Changed
+- 设置中点击「检查更新」若发现新版本，直接打开 GitHub Releases 页面。
+
 ## [0.5.0] - 2026-09-15
 
 ### Added

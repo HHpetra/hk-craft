@@ -103,7 +103,10 @@ export function SettingsDialog() {
   function refreshUpdate() {
     if (update.status === "checking") return;
     setUpdate({ status: "checking" });
-    void checkAppUpdate(true).then(setUpdate);
+    void checkAppUpdate(true).then((result) => {
+      setUpdate(result);
+      if (result.status === "outdated") openGithub(APP_RELEASES_URL);
+    });
   }
 
   const updateLabel =

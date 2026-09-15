@@ -50,3 +50,10 @@ export function checkAppUpdate(force = false) {
   cached = pending;
   return pending;
 }
+
+export function updatePromptCopy(latest: string, current: string) {
+  return {
+    title: `发现新版本 v${latest.trim().replace(/^v/i, "")}`,
+    message: `当前为 v${current.trim().replace(/^v/i, "")}`,
+  };
+}

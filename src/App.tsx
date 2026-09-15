@@ -3,6 +3,7 @@ import { AppLayout } from "./components/layout/AppLayout";
 import { SettingsDialog } from "./components/settings/SettingsDialog";
 import { ProjectDialog } from "./components/settings/ProjectDialog";
 import { Toast } from "./components/ui/Toast";
+import { UpdatePrompt } from "./components/ui/UpdatePrompt";
 import { applyRegisteredXtermTheme } from "./components/terminal/TerminalPane";
 import { useOsFileDrop } from "./hooks/useOsFileDrop";
 import { usePtyStatusListener } from "./hooks/usePtyStatusListener";
@@ -66,6 +67,7 @@ export default function App() {
       <SettingsDialog />
       <ProjectDialog />
       <Toast />
+      <UpdatePrompt />
     </div>
   );
 }
