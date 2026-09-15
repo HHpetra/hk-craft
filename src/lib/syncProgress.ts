@@ -37,10 +37,30 @@ export function syncProgressCounts(progress: {
   return `增加 ${progress.added} 个，修改 ${progress.modified} 个，删除 ${progress.deleted} 个`;
 }
 
+export const SYNC_LOG_LIMIT = 200;
+
+export function syncProgressLogLine(progress: Pick<SyncProgress, "file" | "op">): string {
+  if (!progress.file) return "";
+  const op = syncOpLabel(progress.op);
+  return op ? `${op} ${progress.file}` : progress.file;
+}
+
+export function appendSyncLog(
+  lines: string[],
+  progress: Pick<SyncProgress, "file" | "op">,
+  limit = SYNC_LOG_LIMIT,
+): string[] {
+  const line = syncProgressLogLine(progress);
+  if (!line || lines[lines.length - 1] === line) return lines;
+  const next = lines.length >= limit ? lines.slice(lines.length - limit + 1) : lines.slice();
+  next.push(line);
+  return next;
+}
+
 export function syncProgressCurrent(progress: SyncProgress): string {
   const parts: string[] = [];
-  const op = syncOpLabel(progress.op);
-  if (progress.file) parts.push(op ? `${op} ${progress.file}` : progress.file);
+  const line = syncProgressLogLine(progress);
+  if (line) parts.push(line);
   if (progress.speed) parts.push(progress.speed);
   return parts.join(" · ");
 }

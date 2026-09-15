@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
+  appendSyncLog,
   clampPercent,
   emptySyncProgress,
+  SYNC_LOG_LIMIT,
   syncOpLabel,
   syncProgressCounts,
   syncProgressCurrent,
   syncProgressDetail,
+  syncProgressLogLine,
   syncProgressTitle,
 } from "./syncProgress";
 
@@ -63,6 +66,36 @@ describe("syncProgressDetail", () => {
         message: "未找到 unison，请安装 Unison 并加入 PATH",
       }),
     ).toBe("未找到 unison，请安装 Unison 并加入 PATH");
+  });
+});
+
+describe("syncProgressLogLine", () => {
+  it("prefixes the file with its op", () => {
+    expect(syncProgressLogLine({ file: "old.txt", op: "delete" })).toBe("删除 old.txt");
+  });
+
+  it("skips empty files", () => {
+    expect(syncProgressLogLine({ file: "", op: "add" })).toBe("");
+  });
+});
+
+describe("appendSyncLog", () => {
+  it("appends a new file line", () => {
+    expect(appendSyncLog([], { file: "src/a.ts", op: "modify" })).toEqual(["修改 src/a.ts"]);
+  });
+
+  it("ignores empty files and consecutive duplicates", () => {
+    const once = appendSyncLog(["修改 src/a.ts"], { file: "src/a.ts", op: "modify" });
+    expect(once).toEqual(["修改 src/a.ts"]);
+    expect(appendSyncLog(once, { file: "", op: "add" })).toBe(once);
+  });
+
+  it("caps at the log limit", () => {
+    const full = Array.from({ length: SYNC_LOG_LIMIT }, (_, i) => `增加 ${i}.txt`);
+    const next = appendSyncLog(full, { file: "new.txt", op: "add" });
+    expect(next).toHaveLength(SYNC_LOG_LIMIT);
+    expect(next[0]).toBe("增加 1.txt");
+    expect(next[next.length - 1]).toBe("增加 new.txt");
   });
 });
 

@@ -22,7 +22,7 @@ import { beginPathDrag } from "../../lib/dnd";
 import { minColumnPct, normalizeColumnWidths, resizeAdjacent } from "../../lib/explorerColumns";
 import { deleteConfirmCopy } from "../../lib/explorerDelete";
 import { previewHasChanges, remoteSyncConfigured, syncDoneNotice } from "../../lib/remoteSync";
-import { emptySyncProgress } from "../../lib/syncProgress";
+import { appendSyncLog, emptySyncProgress } from "../../lib/syncProgress";
 import {
   applyClear,
   applyClick,
@@ -137,6 +137,7 @@ export function FileExplorer({ project, paneId }: { project: Project; paneId: st
   const [syncPreviewResult, setSyncPreviewResult] = useState<SyncPreview | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [syncProgress, setSyncProgress] = useState<SyncProgress | null>(null);
+  const [syncLog, setSyncLog] = useState<string[]>([]);
   const [activeSync, setActiveSync] = useState<SyncDirection | null>(null);
   const [clip, setClip] = useState(getFsClipboard);
   const paneRef = useRef<HTMLDivElement>(null);
@@ -281,9 +282,11 @@ export function FileExplorer({ project, paneId }: { project: Project; paneId: st
     setSyncing(true);
     setActiveSync(direction);
     setSyncProgress(emptySyncProgress(project.id));
+    setSyncLog([]);
     const unlisten = await listen<SyncProgress>("sync-progress", (event) => {
       if (event.payload.project_id !== project.id) return;
       setSyncProgress(event.payload);
+      setSyncLog((prev) => appendSyncLog(prev, event.payload));
     });
     try {
       const result = await syncConfirm(project.id, direction);
@@ -904,8 +907,10 @@ export function FileExplorer({ project, paneId }: { project: Project; paneId: st
         <SyncProgressDialog
           direction={activeSync}
           progress={syncProgress}
+          log={syncLog}
           onClose={() => {
             setSyncProgress(null);
+            setSyncLog([]);
             setActiveSync(null);
             setSyncing(false);
           }}
