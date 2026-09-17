@@ -175,6 +175,12 @@ export function FileExplorer({ project, paneId }: { project: Project; paneId: st
   const requestRemoveRef = useRef<(items?: FileEntry[]) => void>(() => undefined);
   const deleteBlockedRef = useRef(false);
   const parkedSyncRef = useRef(false);
+  const ownsSyncRef = useRef(false);
+  const ownsPatchRef = useRef(false);
+  const confirmLockRef = useRef(false);
+  const patchLockRef = useRef(false);
+  const [confirmingSync, setConfirmingSync] = useState(false);
+  const [confirmingPatch, setConfirmingPatch] = useState(false);
   columnWidthsRef.current = columnWidths;
 
   const agentPrefix = presets.find((preset) => preset.id === project.agent_preset)?.drag_prefix ?? "@";
@@ -184,8 +190,11 @@ export function FileExplorer({ project, paneId }: { project: Project; paneId: st
   useEffect(() => {
     return () => {
       parkedSyncRef.current = false;
-      void syncAbort(project.id);
-      void gitPatchAbort(project.id);
+      confirmLockRef.current = false;
+      if (ownsSyncRef.current) void syncAbort(project.id);
+      if (ownsPatchRef.current) void gitPatchAbort(project.id);
+      ownsSyncRef.current = false;
+      ownsPatchRef.current = false;
     };
   }, [project.id]);
 
@@ -288,17 +297,20 @@ export function FileExplorer({ project, paneId }: { project: Project; paneId: st
   }, [gitRepo]);
 
   async function startSyncPreview(direction: SyncDirection) {
-    if (syncBusy || !remoteReady) return;
+    if (syncBusy || !remoteReady || confirmLockRef.current) return;
     setScanningSync(direction);
     setSyncPreviewResult(null);
     parkedSyncRef.current = false;
+    ownsSyncRef.current = true;
     try {
       const preview = await syncPreview(project.id, direction);
       const parked = previewHasChanges(preview);
       parkedSyncRef.current = parked;
+      ownsSyncRef.current = parked;
       setSyncPreviewResult(preview);
     } catch (err) {
       parkedSyncRef.current = false;
+      ownsSyncRef.current = false;
       setNotice(String(err));
       setScanningSync(null);
       setSyncPreviewResult(null);
@@ -312,23 +324,35 @@ export function FileExplorer({ project, paneId }: { project: Project; paneId: st
 
   function cancelSyncPreview() {
     parkedSyncRef.current = false;
+    ownsSyncRef.current = false;
+    confirmLockRef.current = false;
+    setConfirmingSync(false);
     clearPreviewUi();
     void syncAbort(project.id);
   }
 
   function confirmSyncPreview() {
+    if (confirmLockRef.current) return;
     if (!scanningSync || !syncPreviewResult || !previewHasChanges(syncPreviewResult)) {
       cancelSyncPreview();
       return;
     }
+    confirmLockRef.current = true;
+    setConfirmingSync(true);
     const direction = scanningSync;
     parkedSyncRef.current = false;
+    ownsSyncRef.current = true;
     clearPreviewUi();
     void runRemoteSync(direction);
   }
 
   async function runRemoteSync(direction: SyncDirection) {
-    if (syncing || syncProgress || !remoteReady) return;
+    if (syncing || syncProgress || !remoteReady) {
+      confirmLockRef.current = false;
+      setConfirmingSync(false);
+      ownsSyncRef.current = false;
+      return;
+    }
     setSyncing(true);
     setActiveSync(direction);
     setSyncProgress(emptySyncProgress(project.id));
@@ -360,6 +384,8 @@ export function FileExplorer({ project, paneId }: { project: Project; paneId: st
       setNotice(String(err));
     } finally {
       unlisten();
+      confirmLockRef.current = false;
+      setConfirmingSync(false);
     }
   }
 
@@ -391,10 +417,13 @@ export function FileExplorer({ project, paneId }: { project: Project; paneId: st
     if (syncBusy || !remoteReady || !hasGit) return;
     setScanningPatch(true);
     setPatchPreview(null);
+    ownsPatchRef.current = true;
     try {
       const preview = await gitPatchPreview(project.id);
+      ownsPatchRef.current = gitPatchHasChanges(preview);
       setPatchPreview(preview);
     } catch (err) {
+      ownsPatchRef.current = false;
       setNotice(String(err));
       setScanningPatch(false);
       setPatchPreview(null);
@@ -402,19 +431,26 @@ export function FileExplorer({ project, paneId }: { project: Project; paneId: st
   }
 
   function cancelPatchPreview() {
+    ownsPatchRef.current = false;
+    patchLockRef.current = false;
+    setConfirmingPatch(false);
     setScanningPatch(false);
     setPatchPreview(null);
     void gitPatchAbort(project.id);
   }
 
   async function confirmPatchPreview() {
+    if (patchLockRef.current) return;
     if (!patchPreview || !gitPatchHasChanges(patchPreview)) {
       cancelPatchPreview();
       return;
     }
+    patchLockRef.current = true;
+    setConfirmingPatch(true);
     setScanningPatch(false);
     setPatchPreview(null);
     setApplyingPatch(true);
+    ownsPatchRef.current = true;
     try {
       const result = await gitPatchApply(project.id);
       setNotice(gitPatchDoneNotice(result));
@@ -424,6 +460,9 @@ export function FileExplorer({ project, paneId }: { project: Project; paneId: st
     } catch (err) {
       setNotice(String(err));
     } finally {
+      ownsPatchRef.current = false;
+      patchLockRef.current = false;
+      setConfirmingPatch(false);
       setApplyingPatch(false);
     }
   }
@@ -1042,6 +1081,7 @@ export function FileExplorer({ project, paneId }: { project: Project; paneId: st
           preview={syncPreviewResult}
           onCancel={cancelSyncPreview}
           onConfirm={confirmSyncPreview}
+          busy={confirmingSync}
         />
       )}
       {scanningPatch && !patchPreview && <GitPatchScanDialog />}
@@ -1050,6 +1090,7 @@ export function FileExplorer({ project, paneId }: { project: Project; paneId: st
           preview={patchPreview}
           onCancel={cancelPatchPreview}
           onConfirm={() => void confirmPatchPreview()}
+          busy={confirmingPatch}
         />
       )}
       {activeSync && syncProgress && (
@@ -1057,7 +1098,11 @@ export function FileExplorer({ project, paneId }: { project: Project; paneId: st
           direction={activeSync}
           progress={syncProgress}
           log={syncLog}
+          onCancel={() => {
+            void syncAbort(project.id);
+          }}
           onClose={() => {
+            ownsSyncRef.current = false;
             setSyncProgress(null);
             setSyncLog([]);
             setActiveSync(null);

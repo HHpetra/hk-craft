@@ -128,12 +128,46 @@ pub fn is_git_sha(value: &str) -> bool {
 
 fn parse_diff_git_line(line: &str) -> Option<(String, String)> {
     let rest = line.strip_prefix("diff --git ")?;
-    let rest = rest.strip_prefix("a/")?;
-    let (a, b) = rest.split_once(" b/")?;
+    let (a, rest) = parse_git_path_token(rest)?;
+    let (b, _) = parse_git_path_token(rest)?;
+    let a = strip_diff_side_prefix(&a)?;
+    let b = strip_diff_side_prefix(&b)?;
     if a.is_empty() || b.is_empty() {
         return None;
     }
-    Some((a.to_string(), b.to_string()))
+    Some((a, b))
+}
+
+fn strip_diff_side_prefix(path: &str) -> Option<String> {
+    path.strip_prefix("a/")
+        .or_else(|| path.strip_prefix("b/"))
+        .map(str::to_string)
+}
+
+fn parse_git_path_token(input: &str) -> Option<(String, &str)> {
+    let s = input.trim_start();
+    if s.is_empty() {
+        return None;
+    }
+    if let Some(rest) = s.strip_prefix('"') {
+        let mut out = String::new();
+        let mut chars = rest.chars();
+        while let Some(ch) = chars.next() {
+            if ch == '\\' {
+                out.push(chars.next()?);
+                continue;
+            }
+            if ch == '"' {
+                return Some((out, chars.as_str()));
+            }
+            out.push(ch);
+        }
+        return None;
+    }
+    match s.split_once(' ') {
+        Some((tok, rest)) => Some((tok.to_string(), rest)),
+        None => Some((s.to_string(), "")),
+    }
 }
 
 pub fn parse_diff_paths(patch: &str) -> Vec<(DiffKind, String)> {
@@ -244,7 +278,7 @@ fn split_head_and_patch(stdout: &[u8]) -> AppResult<(String, Vec<u8>)> {
 fn remote_patch_script(path: &str) -> String {
     let quoted = posix_single_quote(path);
     format!(
-        "cd -- {quoted} && git rev-parse --is-inside-work-tree >/dev/null && git rev-parse HEAD && printf '%s\\n' HKCRAFT_PATCH && git diff HEAD --binary && git ls-files --others --exclude-standard | while IFS= read -r f; do [ -n \"$f\" ] || continue; git --no-pager diff --no-index --binary -- /dev/null \"$f\" || :; done"
+        "cd -- {quoted} && git rev-parse --is-inside-work-tree >/dev/null && git rev-parse HEAD && printf '%s\\n' HKCRAFT_PATCH && git diff HEAD --binary && others=$(git ls-files --others --exclude-standard) && while IFS= read -r f; do [ -n \"$f\" ] || continue; git --no-pager diff --no-index --binary -- /dev/null \"$f\"; ec=$?; if [ \"$ec\" -ne 0 ] && [ \"$ec\" -ne 1 ]; then exit \"$ec\"; fi; done <<EOF\n$others\nEOF"
     )
 }
 
@@ -324,7 +358,7 @@ fn git_ok_text(root: &Path, args: &[&str]) -> AppResult<String> {
 fn ssh_output(remote: &RemoteTarget, script: &str) -> AppResult<(Vec<u8>, Vec<u8>, std::process::ExitStatus)> {
     let dest = ssh_destination(&remote.user, &remote.host);
     let child = spawn_piped("ssh", |cmd| {
-        cmd.args(ssh_argv_opts()).arg(&dest).arg(script);
+        cmd.args(ssh_argv_opts(remote.port)).arg(&dest).arg(script);
     })?;
     collect_output(child, GIT_TIMEOUT, "ssh")
 }
@@ -614,5 +648,21 @@ index 000..444
         assert!(script.contains("git diff HEAD --binary"));
         assert!(script.contains("git ls-files --others --exclude-standard"));
         assert!(script.contains("diff --no-index"));
+        assert!(script.contains("ec=$?"));
+        assert!(script.contains("[ \"$ec\" -ne 1 ]"));
+        assert!(!script.contains("|| :"));
+    }
+
+    #[test]
+    fn parse_diff_paths_reads_quoted_spaces() {
+        let patch = r#"diff --git "a/foo bar.txt" "b/foo bar.txt"
+index 111..222 100644
+--- "a/foo bar.txt"
++++ "b/foo bar.txt"
+"#;
+        assert_eq!(
+            parse_diff_paths(patch),
+            vec![(DiffKind::Modify, "foo bar.txt".into())]
+        );
     }
 }

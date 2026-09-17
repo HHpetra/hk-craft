@@ -32,6 +32,8 @@ function gitHash(): string {
 
 export default defineConfig(async () => ({
   plugins: [react(), tailwindcss()],
+  // Relative URLs so the embedded custom protocol can resolve JS/CSS.
+  base: "./",
   define: {
     __APP_VERSION__: JSON.stringify(appVersion()),
     __APP_GIT_HASH__: JSON.stringify(gitHash()),

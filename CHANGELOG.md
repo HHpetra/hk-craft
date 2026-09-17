@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Agent 终端（含 dsh-tui）在 Windows 上中英混排不再行尾掉字或重叠：改用现代 ConPTY 换行、Unicode 11 测宽，以及等宽 CJK 字体回退；IME 预编辑钉在输入光标而不是底栏反色。
+- 修复安装包启动时报 `asset not found: index.html`：前端 `dist` 变化时强制重新嵌入资源，避免增量打包打出空页面。
+- 同步：同项目多个资源管理器卸载不再中止其它面板的预览；传输中可取消；确认防重复提交；下载缺失远程不再先 mkdir 再把本地镜像成空目录；主机 `host:port` 不再被当成 IPv6；gitignore 的 `!` 与嵌套规则会交给 Unison；Git 未跟踪文件的错误码不再被吞掉，带空格路径可解析。
 
 ## [0.5.0] - 2026-09-15
 

@@ -3,7 +3,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -19,11 +19,14 @@ const SSH_TIMEOUT: Duration = Duration::from_secs(60);
 const PREVIEW_LIST_CAP: usize = 200;
 const UNISON_MAX_THREADS: u32 = 4;
 const PREVIEW_EXPIRED_MSG: &str = "预览已过期，请重新扫描";
+const CANCELLED_MSG: &str = "已取消";
+const BUSY_MSG: &str = "同步正在进行";
 const FORBIDDEN: [char; 6] = ['\n', '\r', ';', '|', '&', '$'];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RemoteTarget {
     pub host: String,
+    pub port: Option<u16>,
     pub user: String,
     pub path: String,
 }
@@ -112,30 +115,77 @@ pub fn posix_single_quote(value: &str) -> String {
     out
 }
 
+pub fn parse_host_port(raw: &str) -> Result<(String, Option<u16>), String> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return Err("请填写主机".into());
+    }
+    if raw.starts_with('[') {
+        let close = raw.find(']').ok_or_else(|| "主机无效".to_string())?;
+        let inner = &raw[1..close];
+        if inner.is_empty() {
+            return Err("主机无效".into());
+        }
+        return Ok((inner.to_string(), parse_port_suffix(&raw[close + 1..])?));
+    }
+    if raw.chars().filter(|c| *c == ':').count() == 1 {
+        if let Some((host, port_s)) = raw.rsplit_once(':') {
+            if !host.is_empty() && !port_s.is_empty() && port_s.chars().all(|c| c.is_ascii_digit()) {
+                return Ok((host.to_string(), Some(parse_port_number(port_s)?)));
+            }
+        }
+    }
+    Ok((raw.to_string(), None))
+}
+
+fn parse_port_suffix(rest: &str) -> Result<Option<u16>, String> {
+    if rest.is_empty() {
+        return Ok(None);
+    }
+    let digits = rest
+        .strip_prefix(':')
+        .ok_or_else(|| "主机无效".to_string())?;
+    Ok(Some(parse_port_number(digits)?))
+}
+
+fn parse_port_number(digits: &str) -> Result<u16, String> {
+    let port: u16 = digits.parse().map_err(|_| "端口无效".to_string())?;
+    if port == 0 {
+        return Err("端口无效".into());
+    }
+    Ok(port)
+}
+
+fn reject_illegal(name: &str, value: &str) -> Result<(), String> {
+    if value.is_empty() {
+        return Err(format!("请填写{name}"));
+    }
+    if value.chars().any(|c| FORBIDDEN.contains(&c) || c == '`' || c.is_control()) {
+        return Err(format!("{name}含有非法字符"));
+    }
+    Ok(())
+}
+
 pub fn validate_remote(host: &str, user: &str, path: &str) -> Result<RemoteTarget, String> {
-    let host = host.trim();
     let user = user.trim();
     let path = path.trim().trim_end_matches('/');
     if path.is_empty() || path == "/" {
         return Err("远程目录无效".into());
     }
-    for (name, value) in [("主机", host), ("用户名", user), ("远程目录", path)] {
-        if value.is_empty() {
-            return Err(format!("请填写{name}"));
-        }
-        if value.chars().any(|c| FORBIDDEN.contains(&c) || c == '`' || c.is_control()) {
-            return Err(format!("{name}含有非法字符"));
-        }
-    }
+    let (host, port) = parse_host_port(host)?;
+    reject_illegal("主机", &host)?;
+    reject_illegal("用户名", user)?;
+    reject_illegal("远程目录", path)?;
     Ok(RemoteTarget {
-        host: host.to_string(),
+        host,
+        port,
         user: user.to_string(),
         path: path.to_string(),
     })
 }
 
 pub fn ssh_destination(user: &str, host: &str) -> String {
-    format!("{user}@{}", host_for_url(host))
+    format!("{user}@{host}")
 }
 
 #[cfg(unix)]
@@ -162,17 +212,21 @@ pub fn ssh_opt_pairs() -> Vec<(&'static str, String)> {
     }
 }
 
-pub fn ssh_argv_opts() -> Vec<String> {
+pub fn ssh_argv_opts(port: Option<u16>) -> Vec<String> {
     let mut out = Vec::new();
     for (key, value) in ssh_opt_pairs() {
         out.push("-o".into());
         out.push(format!("{key}={value}"));
     }
+    if let Some(port) = port {
+        out.push("-p".into());
+        out.push(port.to_string());
+    }
     out
 }
 
-pub fn ssh_args_for_unison() -> String {
-    ssh_argv_opts().join(" ")
+pub fn ssh_args_for_unison(port: Option<u16>) -> String {
+    ssh_argv_opts(port).join(" ")
 }
 
 pub fn parse_unison_version(text: &str) -> Option<(u32, u32)> {
@@ -242,11 +296,15 @@ fn take_pending<V>(
     }
 }
 
+struct TrackedChild {
+    child: Mutex<Child>,
+}
+
 struct PendingSync {
     direction: SyncDirection,
     used_git: bool,
     hold_until: Instant,
-    child: Child,
+    child: Arc<TrackedChild>,
     stdin: Option<ChildStdin>,
     rx: mpsc::Receiver<String>,
     disarm: bool,
@@ -258,7 +316,7 @@ impl Drop for PendingSync {
             return;
         }
         write_reply(&mut self.stdin, "q");
-        kill_unison(&mut self.child);
+        kill_tracked(&self.child);
     }
 }
 
@@ -273,7 +331,9 @@ pub struct SyncHost {
 
 struct SyncHostInner {
     pending: HashMap<String, PendingSync>,
+    running: HashMap<String, Arc<TrackedChild>>,
     cancelled: HashSet<String>,
+    previewing: HashSet<String>,
 }
 
 impl Default for SyncHost {
@@ -287,29 +347,56 @@ impl SyncHost {
         Self {
             inner: Mutex::new(SyncHostInner {
                 pending: HashMap::new(),
+                running: HashMap::new(),
                 cancelled: HashSet::new(),
+                previewing: HashSet::new(),
             }),
         }
     }
 
-    fn begin_preview(&self, project_id: &str) {
+    fn begin_preview(&self, project_id: &str) -> AppResult<()> {
         let mut inner = self.inner.lock().expect("sync lock");
+        if inner.previewing.contains(project_id) || inner.running.contains_key(project_id) {
+            return Err(AppError::msg(BUSY_MSG));
+        }
         inner.cancelled.remove(project_id);
+        inner.previewing.insert(project_id.to_string());
         let old = inner.pending.remove(project_id);
         drop(inner);
         drop(old);
+        Ok(())
+    }
+
+    fn end_previewing(&self, project_id: &str) {
+        let mut inner = self.inner.lock().expect("sync lock");
+        inner.previewing.remove(project_id);
     }
 
     fn abort(&self, project_id: &str) {
         let mut inner = self.inner.lock().expect("sync lock");
         inner.cancelled.insert(project_id.to_string());
+        inner.previewing.remove(project_id);
         let old = inner.pending.remove(project_id);
+        let running = inner.running.remove(project_id);
         drop(inner);
         drop(old);
+        if let Some(child) = running {
+            kill_tracked(&child);
+        }
+    }
+
+    fn is_cancelled(&self, project_id: &str) -> bool {
+        self.inner
+            .lock()
+            .expect("sync lock")
+            .cancelled
+            .contains(project_id)
     }
 
     fn insert(&self, project_id: String, session: PendingSync) {
         let mut inner = self.inner.lock().expect("sync lock");
+        inner.previewing.remove(&project_id);
+        inner.running.remove(&project_id);
         if inner.cancelled.remove(&project_id) {
             drop(inner);
             drop(session);
@@ -322,23 +409,66 @@ impl SyncHost {
 
     fn take(&self, project_id: &str, direction: SyncDirection) -> AppResult<PendingSync> {
         let mut inner = self.inner.lock().expect("sync lock");
+        if inner.cancelled.contains(project_id) || inner.running.contains_key(project_id) {
+            let old = inner.pending.remove(project_id);
+            drop(inner);
+            drop(old);
+            return Err(AppError::msg(PREVIEW_EXPIRED_MSG));
+        }
         let mut session = inner
             .pending
             .remove(project_id)
             .ok_or_else(|| AppError::msg(PREVIEW_EXPIRED_MSG))?;
-        drop(inner);
-        let alive = session.child.try_wait().ok().flatten().is_none();
-        if !session_usable(session.direction, direction, session.hold_until, Instant::now()) || !alive {
+        if !session_usable(session.direction, direction, session.hold_until, Instant::now()) {
+            drop(inner);
             return Err(AppError::msg(PREVIEW_EXPIRED_MSG));
         }
+        inner
+            .running
+            .insert(project_id.to_string(), Arc::clone(&session.child));
+        drop(inner);
+        let alive = {
+            let mut child = session.child.child.lock().expect("child lock");
+            child.try_wait().ok().flatten().is_none()
+        };
+        if !alive {
+            self.finish_running(project_id);
+            return Err(AppError::msg(PREVIEW_EXPIRED_MSG));
+        }
+        session.disarm = true;
         Ok(session)
+    }
+
+    fn finish_running(&self, project_id: &str) {
+        let mut inner = self.inner.lock().expect("sync lock");
+        inner.running.remove(project_id);
+        inner.cancelled.remove(project_id);
+    }
+
+    fn attach_running(&self, project_id: &str, child: Arc<TrackedChild>) -> AppResult<()> {
+        let mut inner = self.inner.lock().expect("sync lock");
+        if inner.cancelled.contains(project_id) {
+            drop(inner);
+            kill_tracked(&child);
+            return Err(AppError::msg(CANCELLED_MSG));
+        }
+        if inner.running.contains_key(project_id) {
+            drop(inner);
+            kill_tracked(&child);
+            return Err(AppError::msg(BUSY_MSG));
+        }
+        inner.running.insert(project_id.to_string(), child);
+        Ok(())
     }
 }
 
-pub fn unison_ssh_root(user: &str, host: &str, path: &str) -> String {
+pub fn unison_ssh_root(user: &str, host: &str, port: Option<u16>, path: &str) -> String {
     let host = host_for_url(host);
     let path = path.trim_end_matches('/');
-    format!("ssh://{user}@{host}/{path}")
+    match port {
+        Some(port) => format!("ssh://{user}@{host}:{port}/{path}"),
+        None => format!("ssh://{user}@{host}/{path}"),
+    }
 }
 
 fn host_for_url(host: &str) -> String {
@@ -357,13 +487,26 @@ fn local_root(path: &Path) -> String {
     dunce::simplified(path).to_string_lossy().into_owned()
 }
 
-pub fn gitignore_to_unison_ignore(raw: &str) -> Option<String> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UnisonIgnoreRule {
+    Ignore(String),
+    IgnoreNot(String),
+}
+
+pub fn gitignore_to_unison_ignore_in(raw: &str, dir_prefix: &str) -> Option<UnisonIgnoreRule> {
     let mut line = raw.trim();
     if let Some(stripped) = line.strip_suffix('\r') {
         line = stripped.trim();
     }
-    if line.is_empty() || line.starts_with('#') || line.starts_with('!') {
+    if line.is_empty() || line.starts_with('#') {
         return None;
+    }
+    let negate = line.starts_with('!');
+    if negate {
+        line = line[1..].trim();
+        if line.is_empty() {
+            return None;
+        }
     }
     let anchored = line.starts_with('/');
     if anchored {
@@ -376,10 +519,21 @@ pub fn gitignore_to_unison_ignore(raw: &str) -> Option<String> {
     if line.is_empty() {
         return None;
     }
-    if anchored || line.contains('/') {
-        Some(format!("Path {line}"))
+    let spec = if dir_prefix.is_empty() {
+        if anchored || line.contains('/') {
+            format!("Path {line}")
+        } else {
+            format!("Name {line}")
+        }
+    } else if anchored || line.contains('/') {
+        format!("Path {dir_prefix}/{line}")
     } else {
-        Some(format!("Name {line}"))
+        format!("Path {dir_prefix}/{line}")
+    };
+    if negate {
+        Some(UnisonIgnoreRule::IgnoreNot(spec))
+    } else {
+        Some(UnisonIgnoreRule::Ignore(spec))
     }
 }
 
@@ -628,19 +782,65 @@ impl PreviewAcc {
     }
 }
 
-fn load_unison_ignores(root: &Path) -> Vec<String> {
-    let mut out = vec!["Name .git".to_string()];
-    let Ok(text) = std::fs::read_to_string(root.join(".gitignore")) else {
-        return out;
+fn load_unison_ignores(root: &Path) -> (Vec<String>, Vec<String>) {
+    let mut ignore = vec!["Name .git".to_string()];
+    let mut ignorenot = Vec::new();
+    push_gitignore_file(root.join(".gitignore"), "", &mut ignore, &mut ignorenot);
+    push_gitignore_file(
+        root.join(".git").join("info").join("exclude"),
+        "",
+        &mut ignore,
+        &mut ignorenot,
+    );
+    walk_nested_gitignores(root, "", 0, &mut ignore, &mut ignorenot);
+    (ignore, ignorenot)
+}
+
+fn push_gitignore_file(path: PathBuf, prefix: &str, ignore: &mut Vec<String>, ignorenot: &mut Vec<String>) {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return;
     };
     for line in text.lines() {
-        if let Some(pat) = gitignore_to_unison_ignore(line) {
-            if !out.contains(&pat) {
-                out.push(pat);
-            }
+        match gitignore_to_unison_ignore_in(line, prefix) {
+            Some(UnisonIgnoreRule::Ignore(pat)) if !ignore.contains(&pat) => ignore.push(pat),
+            Some(UnisonIgnoreRule::IgnoreNot(pat)) if !ignorenot.contains(&pat) => ignorenot.push(pat),
+            _ => {}
         }
     }
-    out
+}
+
+fn walk_nested_gitignores(
+    root: &Path,
+    rel: &str,
+    depth: u32,
+    ignore: &mut Vec<String>,
+    ignorenot: &mut Vec<String>,
+) {
+    if depth >= 6 {
+        return;
+    }
+    let dir = if rel.is_empty() { root.to_path_buf() } else { root.join(rel) };
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let Ok(file_type) = entry.file_type() else { continue };
+        if !file_type.is_dir() {
+            continue;
+        }
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        if name.starts_with('.') || matches!(name, "node_modules" | "target" | "dist" | "build") {
+            continue;
+        }
+        let child_rel = if rel.is_empty() {
+            name.to_string()
+        } else {
+            format!("{rel}/{name}")
+        };
+        push_gitignore_file(dir.join(name).join(".gitignore"), &child_rel, ignore, ignorenot);
+        walk_nested_gitignores(root, &child_rel, depth + 1, ignore, ignorenot);
+    }
 }
 
 fn bump_percent(progress: &mut SyncProgress) {
@@ -693,7 +893,7 @@ fn ssh_mkdir(remote: &RemoteTarget) -> AppResult<()> {
     let dest = ssh_destination(&remote.user, &remote.host);
     let script = format!("mkdir -p -- {}", posix_single_quote(&remote.path));
     let mut cmd = hidden_command("ssh");
-    cmd.args(ssh_argv_opts()).arg(&dest).arg(&script)
+    cmd.args(ssh_argv_opts(remote.port)).arg(&dest).arg(&script)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -813,7 +1013,7 @@ fn unison_command(
     batch: bool,
 ) -> Command {
     let local = local_root(root);
-    let remote_root = unison_ssh_root(&remote.user, &remote.host, &remote.path);
+    let remote_root = unison_ssh_root(&remote.user, &remote.host, remote.port, &remote.path);
     let force = match direction {
         SyncDirection::Upload => local.clone(),
         SyncDirection::Download => remote_root.clone(),
@@ -833,7 +1033,7 @@ fn unison_command(
         .arg("-force")
         .arg(&force)
         .arg("-sshargs")
-        .arg(ssh_args_for_unison());
+        .arg(ssh_args_for_unison(remote.port));
     let version = probe_unison_version();
     if let Some(threads) = unison_maxthreads_arg(version) {
         cmd.arg("-maxthreads").arg(threads.to_string());
@@ -845,8 +1045,12 @@ fn unison_command(
         cmd.env("UNISON", profile_dir);
     }
     if used_git {
-        for ignore in load_unison_ignores(root) {
-            cmd.arg("-ignore").arg(ignore);
+        let (ignore, ignorenot) = load_unison_ignores(root);
+        for pat in ignore {
+            cmd.arg("-ignore").arg(pat);
+        }
+        for pat in ignorenot {
+            cmd.arg("-ignorenot").arg(pat);
         }
     }
     cmd
@@ -885,9 +1089,38 @@ fn write_reply(stdin: &mut Option<ChildStdin>, reply: &str) {
     }
 }
 
-fn kill_unison(child: &mut std::process::Child) {
-    let _ = child.kill();
-    let _ = child.wait();
+fn kill_tracked(child: &TrackedChild) {
+    if let Ok(mut guard) = child.child.lock() {
+        kill_unison(&mut guard);
+    }
+}
+
+fn wait_tracked(
+    child: &TrackedChild,
+    deadline: Instant,
+    bin: &str,
+) -> AppResult<std::process::ExitStatus> {
+    loop {
+        {
+            let mut guard = child.child.lock().expect("child lock");
+            match guard.try_wait() {
+                Ok(Some(status)) => return Ok(status),
+                Ok(None) => {
+                    if Instant::now() >= deadline {
+                        kill_unison(&mut guard);
+                        return Err(AppError::msg(format!("{bin} 超时")));
+                    }
+                }
+                Err(err) => return Err(AppError::msg(format!("无法等待 {bin}：{err}"))),
+            }
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+}
+
+fn abort_preview_process(stdin: &mut Option<ChildStdin>, child: &TrackedChild) {
+    drop(stdin.take());
+    kill_tracked(child);
 }
 
 fn truncate_err(msg: &str) -> String {
@@ -900,8 +1133,10 @@ fn truncate_err(msg: &str) -> String {
 
 fn drain_unison_progress(
     app: &AppHandle,
+    host: Option<&SyncHost>,
     project_id: &str,
-    child: &mut Child,
+    child: &TrackedChild,
+    stdin: &mut Option<ChildStdin>,
     rx: &mpsc::Receiver<String>,
     used_git: bool,
 ) -> AppResult<SyncResult> {
@@ -923,14 +1158,27 @@ fn drain_unison_progress(
     let mut errors = Vec::new();
     let deadline = Instant::now() + SYNC_TIMEOUT;
     while Instant::now() < deadline {
+        if host.is_some_and(|h| h.is_cancelled(project_id)) {
+            kill_tracked(child);
+            progress.phase = "error".into();
+            progress.message = CANCELLED_MSG.into();
+            emit_progress(app, &progress);
+            return Err(AppError::msg(CANCELLED_MSG));
+        }
         match rx.recv_timeout(Duration::from_millis(80)) {
             Ok(line) => {
+                if let Some(parsed) = parse_unison_preview_line(&line) {
+                    if let Some(reply) = preview_prompt_reply(&parsed) {
+                        write_reply(stdin, reply);
+                    }
+                }
                 apply_line(&mut progress, &line, &mut errors);
                 progress.phase = "running".into();
                 emit_progress(app, &progress);
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
-                if child.try_wait()?.is_some() {
+                let mut guard = child.child.lock().expect("child lock");
+                if guard.try_wait()?.is_some() {
                     break;
                 }
             }
@@ -941,16 +1189,48 @@ fn drain_unison_progress(
     let drain_until = Instant::now() + Duration::from_millis(400);
     while Instant::now() < drain_until {
         match rx.recv_timeout(Duration::from_millis(50)) {
-            Ok(line) => apply_line(&mut progress, &line, &mut errors),
+            Ok(line) => {
+                if let Some(parsed) = parse_unison_preview_line(&line) {
+                    if let Some(reply) = preview_prompt_reply(&parsed) {
+                        write_reply(stdin, reply);
+                    }
+                }
+                apply_line(&mut progress, &line, &mut errors);
+            }
             Err(mpsc::RecvTimeoutError::Timeout) => continue,
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         }
     }
 
-    let status = match child.try_wait()? {
-        Some(status) => status,
-        None => wait_child(child, deadline, "unison")?,
+    let status = loop {
+        if host.is_some_and(|h| h.is_cancelled(project_id)) {
+            kill_tracked(child);
+            progress.phase = "error".into();
+            progress.message = CANCELLED_MSG.into();
+            emit_progress(app, &progress);
+            return Err(AppError::msg(CANCELLED_MSG));
+        }
+        {
+            let mut guard = child.child.lock().expect("child lock");
+            match guard.try_wait()? {
+                Some(status) => break status,
+                None => {
+                    if Instant::now() >= deadline {
+                        kill_unison(&mut guard);
+                        return Err(AppError::msg("unison 超时"));
+                    }
+                }
+            }
+        }
+        thread::sleep(Duration::from_millis(50));
     };
+
+    if host.is_some_and(|h| h.is_cancelled(project_id)) {
+        progress.phase = "error".into();
+        progress.message = CANCELLED_MSG.into();
+        emit_progress(app, &progress);
+        return Err(AppError::msg(CANCELLED_MSG));
+    }
 
     if !status.success() {
         let msg = truncate_err(&errors.last().cloned().unwrap_or_else(|| {
@@ -975,8 +1255,20 @@ fn drain_unison_progress(
     })
 }
 
+fn kill_unison(child: &mut std::process::Child) {
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+fn track_child(child: Child) -> Arc<TrackedChild> {
+    Arc::new(TrackedChild {
+        child: Mutex::new(child),
+    })
+}
+
 fn run_unison(
     app: &AppHandle,
+    host: &SyncHost,
     project_id: &str,
     root: &Path,
     remote: &RemoteTarget,
@@ -986,32 +1278,53 @@ fn run_unison(
     let cmd = unison_command(root, remote, direction, used_git, true);
     let mut child = spawn_unison(cmd, Stdio::null())?;
     let rx = attach_pipes(&mut child);
-    drain_unison_progress(app, project_id, &mut child, &rx, used_git)
+    let tracked = track_child(child);
+    host.attach_running(project_id, Arc::clone(&tracked))?;
+    let mut stdin = None;
+    let result = drain_unison_progress(
+        app,
+        Some(host),
+        project_id,
+        &tracked,
+        &mut stdin,
+        &rx,
+        used_git,
+    );
+    host.finish_running(project_id);
+    result
 }
 
 fn finish_parked_unison(
     app: &AppHandle,
+    host: &SyncHost,
     project_id: &str,
     mut session: PendingSync,
 ) -> AppResult<SyncResult> {
     write_reply(&mut session.stdin, "y");
     let result = drain_unison_progress(
         app,
+        Some(host),
         project_id,
-        &mut session.child,
+        &session.child,
+        &mut session.stdin,
         &session.rx,
         session.used_git,
     );
-    session.disarm = true;
+    host.finish_running(project_id);
     result
 }
 
-fn abort_preview_process(stdin: &mut Option<ChildStdin>, child: &mut Child) {
-    drop(stdin.take());
-    kill_unison(child);
+fn preview_cancelled(host: &SyncHost, project_id: &str, stdin: &mut Option<ChildStdin>, child: &TrackedChild) -> bool {
+    if !host.is_cancelled(project_id) {
+        return false;
+    }
+    abort_preview_process(stdin, child);
+    true
 }
 
 fn run_unison_preview(
+    host: &SyncHost,
+    project_id: &str,
     root: &Path,
     remote: &RemoteTarget,
     direction: SyncDirection,
@@ -1021,10 +1334,16 @@ fn run_unison_preview(
     let mut child = spawn_unison(cmd, Stdio::piped())?;
     let mut stdin = child.stdin.take();
     let rx = attach_pipes(&mut child);
+    let tracked = track_child(child);
+    host.attach_running(project_id, Arc::clone(&tracked))?;
     let mut acc = PreviewAcc::default();
     let deadline = Instant::now() + SYNC_TIMEOUT;
 
     while Instant::now() < deadline {
+        if preview_cancelled(host, project_id, &mut stdin, &tracked) {
+            host.finish_running(project_id);
+            return Err(AppError::msg(CANCELLED_MSG));
+        }
         match rx.recv_timeout(Duration::from_millis(80)) {
             Ok(line) => {
                 if let Some(parsed) = parse_unison_preview_line(&line) {
@@ -1034,7 +1353,8 @@ fn run_unison_preview(
                 }
                 apply_preview_line(&mut acc, &line, direction);
                 if acc.propagating {
-                    abort_preview_process(&mut stdin, &mut child);
+                    abort_preview_process(&mut stdin, &tracked);
+                    host.finish_running(project_id);
                     return Err(AppError::msg("预览时同步已开始，已中止"));
                 }
                 if acc.proceed {
@@ -1042,7 +1362,11 @@ fn run_unison_preview(
                 }
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
-                if child.try_wait()?.is_some() {
+                let exited = {
+                    let mut guard = tracked.child.lock().expect("child lock");
+                    guard.try_wait()?.is_some()
+                };
+                if exited {
                     break;
                 }
             }
@@ -1052,11 +1376,16 @@ fn run_unison_preview(
 
     let drain_until = Instant::now() + Duration::from_millis(400);
     while Instant::now() < drain_until {
+        if preview_cancelled(host, project_id, &mut stdin, &tracked) {
+            host.finish_running(project_id);
+            return Err(AppError::msg(CANCELLED_MSG));
+        }
         match rx.recv_timeout(Duration::from_millis(50)) {
             Ok(line) => {
                 apply_preview_line(&mut acc, &line, direction);
                 if acc.propagating {
-                    abort_preview_process(&mut stdin, &mut child);
+                    abort_preview_process(&mut stdin, &tracked);
+                    host.finish_running(project_id);
                     return Err(AppError::msg("预览时同步已开始，已中止"));
                 }
             }
@@ -1066,12 +1395,16 @@ fn run_unison_preview(
     }
 
     if acc.propagating {
-        abort_preview_process(&mut stdin, &mut child);
+        abort_preview_process(&mut stdin, &tracked);
+        host.finish_running(project_id);
         return Err(AppError::msg("预览时同步已开始，已中止"));
     }
 
     let has_items = acc.added_count + acc.modified_count + acc.deleted_count > 0;
-    let still_running = child.try_wait()?.is_none();
+    let still_running = {
+        let mut guard = tracked.child.lock().expect("child lock");
+        guard.try_wait()?.is_none()
+    };
     if acc.proceed && has_items && still_running {
         return Ok(PreviewOutcome::Parked(
             acc.into_preview(used_git),
@@ -1079,7 +1412,7 @@ fn run_unison_preview(
                 direction,
                 used_git,
                 hold_until: Instant::now() + HOLD_TIMEOUT,
-                child,
+                child: tracked,
                 stdin,
                 rx,
                 disarm: false,
@@ -1088,9 +1421,10 @@ fn run_unison_preview(
     }
 
     if still_running {
-        match wait_child(&mut child, deadline, "unison") {
+        match wait_tracked(&tracked, deadline, "unison") {
             Ok(_) => {}
             Err(_) => {
+                host.finish_running(project_id);
                 if acc.nothing || !has_items {
                     return Ok(PreviewOutcome::Done(acc.into_preview(used_git)));
                 }
@@ -1099,6 +1433,7 @@ fn run_unison_preview(
         }
     }
 
+    host.finish_running(project_id);
     if !acc.errors.is_empty() && !acc.proceed && !acc.nothing && !has_items {
         let msg = truncate_err(acc.errors.last().expect("errors not empty"));
         return Err(AppError::msg(format!("unison 失败：{msg}")));
@@ -1108,6 +1443,7 @@ fn run_unison_preview(
 
 fn run_sync(
     app: &AppHandle,
+    host: &SyncHost,
     project_id: &str,
     root: &Path,
     remote: &RemoteTarget,
@@ -1117,8 +1453,10 @@ fn run_sync(
         return Err(AppError::msg("项目目录不存在"));
     }
     let used_git = has_git_metadata(root);
-    ssh_mkdir(remote)?;
-    run_unison(app, project_id, root, remote, direction, used_git)
+    if matches!(direction, SyncDirection::Upload) {
+        ssh_mkdir(remote)?;
+    }
+    run_unison(app, host, project_id, root, remote, direction, used_git)
 }
 
 fn emit_sync_error(app: &AppHandle, project_id: &str, err: &AppError) {
@@ -1150,11 +1488,26 @@ fn run_preview(
     if !root.is_dir() {
         return Err(AppError::msg("项目目录不存在"));
     }
-    host.begin_preview(project_id);
+    host.begin_preview(project_id)?;
     let used_git = has_git_metadata(root);
-    ssh_mkdir(remote)?;
-    match run_unison_preview(root, remote, direction, used_git)? {
-        PreviewOutcome::Done(preview) => Ok(preview),
+    if matches!(direction, SyncDirection::Upload) {
+        if let Err(err) = ssh_mkdir(remote) {
+            host.end_previewing(project_id);
+            return Err(err);
+        }
+    }
+    let outcome = match run_unison_preview(host, project_id, root, remote, direction, used_git) {
+        Ok(outcome) => outcome,
+        Err(err) => {
+            host.end_previewing(project_id);
+            return Err(err);
+        }
+    };
+    match outcome {
+        PreviewOutcome::Done(preview) => {
+            host.end_previewing(project_id);
+            Ok(preview)
+        }
         PreviewOutcome::Parked(preview, session) => {
             host.insert(project_id.to_string(), session);
             Ok(preview)
@@ -1193,7 +1546,7 @@ pub fn sync_project(
     let (path, host, user, remote_path) = project_sync_fields(&state, &project_id)?;
     let remote = validate_remote(&host, &user, &remote_path).map_err(AppError::msg)?;
     let dir = parse_direction(&direction)?;
-    match run_sync(&app, &project_id, &path, &remote, dir) {
+    match run_sync(&app, &state.sync, &project_id, &path, &remote, dir) {
         Ok(result) => Ok(result),
         Err(err) => {
             emit_sync_error(&app, &project_id, &err);
@@ -1223,7 +1576,7 @@ pub fn sync_confirm(
 ) -> AppResult<SyncResult> {
     let dir = parse_direction(&direction)?;
     let session = state.sync.take(&project_id, dir)?;
-    match finish_parked_unison(&app, &project_id, session) {
+    match finish_parked_unison(&app, &state.sync, &project_id, session) {
         Ok(result) => Ok(result),
         Err(err) => {
             emit_sync_error(&app, &project_id, &err);
@@ -1241,6 +1594,10 @@ pub fn sync_abort(project_id: String, state: State<AppState>) -> AppResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn gitignore_to_unison_ignore(raw: &str) -> Option<UnisonIgnoreRule> {
+        gitignore_to_unison_ignore_in(raw, "")
+    }
 
     #[test]
     fn posix_single_quote_wraps_and_escapes() {
@@ -1260,20 +1617,40 @@ mod tests {
         assert!(validate_remote("10.0.0.2;rm", "dev", "/home/dev/p").is_err());
         let ok = validate_remote("10.0.0.2", "dev", "/home/dev/p/").unwrap();
         assert_eq!(ok.path, "/home/dev/p");
+        assert_eq!(ok.port, None);
+        let with_port = validate_remote("10.0.0.2:2222", "dev", "/home/dev/p").unwrap();
+        assert_eq!(with_port.host, "10.0.0.2");
+        assert_eq!(with_port.port, Some(2222));
+        let ipv6 = validate_remote("2001:db8::1", "dev", "/tmp/p").unwrap();
+        assert_eq!(ipv6.host, "2001:db8::1");
+        assert_eq!(ipv6.port, None);
+    }
+
+    #[test]
+    fn parse_host_port_keeps_ipv6_and_splits_host_port() {
+        assert_eq!(parse_host_port("example.com:2222").unwrap(), ("example.com".into(), Some(2222)));
+        assert_eq!(parse_host_port("[2001:db8::1]:2222").unwrap(), ("2001:db8::1".into(), Some(2222)));
+        assert_eq!(parse_host_port("2001:db8::1").unwrap(), ("2001:db8::1".into(), None));
+        assert!(parse_host_port("host:0").is_err());
+        assert!(parse_host_port("host:abc").is_ok());
     }
 
     #[test]
     fn unison_ssh_root_uses_double_slash_for_absolute() {
         assert_eq!(
-            unison_ssh_root("dev", "10.0.0.2", "/tmp/p"),
+            unison_ssh_root("dev", "10.0.0.2", None, "/tmp/p"),
             "ssh://dev@10.0.0.2//tmp/p"
         );
         assert_eq!(
-            unison_ssh_root("dev", "2001:db8::1", "/tmp/p"),
+            unison_ssh_root("dev", "2001:db8::1", None, "/tmp/p"),
             "ssh://dev@[2001:db8::1]//tmp/p"
         );
         assert_eq!(
-            unison_ssh_root("dev", "10.0.0.2", "work/p"),
+            unison_ssh_root("dev", "10.0.0.2", Some(2222), "/tmp/p"),
+            "ssh://dev@10.0.0.2:2222//tmp/p"
+        );
+        assert_eq!(
+            unison_ssh_root("dev", "10.0.0.2", None, "work/p"),
             "ssh://dev@10.0.0.2/work/p"
         );
     }
@@ -1291,12 +1668,16 @@ mod tests {
 
     #[test]
     fn gitignore_to_unison_ignore_converts_common_lines() {
-        assert_eq!(gitignore_to_unison_ignore("node_modules/").as_deref(), Some("Name node_modules"));
-        assert_eq!(gitignore_to_unison_ignore("*.log").as_deref(), Some("Name *.log"));
-        assert_eq!(gitignore_to_unison_ignore("/dist").as_deref(), Some("Path dist"));
-        assert_eq!(gitignore_to_unison_ignore("foo/bar").as_deref(), Some("Path foo/bar"));
+        assert_eq!(gitignore_to_unison_ignore("node_modules/"), Some(UnisonIgnoreRule::Ignore("Name node_modules".into())));
+        assert_eq!(gitignore_to_unison_ignore("*.log"), Some(UnisonIgnoreRule::Ignore("Name *.log".into())));
+        assert_eq!(gitignore_to_unison_ignore("/dist"), Some(UnisonIgnoreRule::Ignore("Path dist".into())));
+        assert_eq!(gitignore_to_unison_ignore("foo/bar"), Some(UnisonIgnoreRule::Ignore("Path foo/bar".into())));
         assert_eq!(gitignore_to_unison_ignore("# comment"), None);
-        assert_eq!(gitignore_to_unison_ignore("!keep.txt"), None);
+        assert_eq!(gitignore_to_unison_ignore("!keep.txt"), Some(UnisonIgnoreRule::IgnoreNot("Name keep.txt".into())));
+        assert_eq!(
+            gitignore_to_unison_ignore_in("*.log", "vendor"),
+            Some(UnisonIgnoreRule::Ignore("Path vendor/*.log".into()))
+        );
         assert_eq!(gitignore_to_unison_ignore("  "), None);
     }
 
@@ -1466,7 +1847,7 @@ mod tests {
 
     #[test]
     fn ssh_opts_include_batch_and_controlmaster() {
-        let args = ssh_args_for_unison();
+        let args = ssh_args_for_unison(None);
         assert!(args.contains("BatchMode=yes"));
         #[cfg(unix)]
         {
@@ -1479,9 +1860,11 @@ mod tests {
             assert!(!args.contains("ControlMaster"));
             assert!(!args.contains("ControlPath"));
         }
-        let argv = ssh_argv_opts();
+        let argv = ssh_argv_opts(None);
         assert_eq!(argv[0], "-o");
         assert!(argv.windows(2).any(|pair| pair[0] == "-o" && pair[1] == "BatchMode=yes"));
+        let with_port = ssh_argv_opts(Some(2222));
+        assert!(with_port.windows(2).any(|pair| pair[0] == "-p" && pair[1] == "2222"));
     }
 
     #[test]
@@ -1510,6 +1893,7 @@ mod tests {
         let root = std::env::temp_dir();
         let remote = RemoteTarget {
             host: "10.0.0.2".into(),
+            port: None,
             user: "dev".into(),
             path: "/tmp/p".into(),
         };
@@ -1532,6 +1916,7 @@ mod tests {
         let root = std::env::temp_dir();
         let remote = RemoteTarget {
             host: "10.0.0.2".into(),
+            port: None,
             user: "dev".into(),
             path: "/tmp/p".into(),
         };

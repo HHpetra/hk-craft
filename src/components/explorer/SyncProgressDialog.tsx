@@ -8,11 +8,13 @@ export function SyncProgressDialog({
   progress,
   log,
   onClose,
+  onCancel,
 }: {
   direction: SyncDirection;
   progress: SyncProgress;
   log: string[];
   onClose: () => void;
+  onCancel?: () => void;
 }) {
   const done = progress.phase === "done" || progress.phase === "error";
   const percent = clampPercent(progress.percent);
@@ -63,6 +65,17 @@ export function SyncProgressDialog({
           <p className="mb-3 whitespace-pre-wrap text-[12px] leading-5 text-(--color-danger)">
             {progress.message || "同步失败"}
           </p>
+        )}
+        {!done && onCancel && (
+          <div className="flex justify-end">
+            <button
+              type="button"
+              className="rounded-md px-3 py-1.5 text-[12px] text-ink-muted hover:text-ink"
+              onClick={onCancel}
+            >
+              取消
+            </button>
+          </div>
         )}
         {done && (
           <div className="flex justify-end">

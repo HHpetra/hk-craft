@@ -34,17 +34,21 @@ export function SyncConfirmDialog({
   preview,
   onConfirm,
   onCancel,
+  busy = false,
 }: {
   direction: SyncDirection;
   preview: SyncPreview;
   onConfirm: () => void;
   onCancel: () => void;
+  busy?: boolean;
 }) {
   const copy = syncConfirmCopy(direction, preview);
   const empty = !previewHasChanges(preview);
   const confirmRef = useRef<HTMLButtonElement>(null);
   const onCancelRef = useRef(onCancel);
+  const busyRef = useRef(busy);
   onCancelRef.current = onCancel;
+  busyRef.current = busy;
 
   useEffect(() => {
     confirmRef.current?.focus();
@@ -52,6 +56,7 @@ export function SyncConfirmDialog({
       if (event.key !== "Escape") return;
       event.preventDefault();
       event.stopPropagation();
+      if (busyRef.current) return;
       onCancelRef.current();
     }
     window.addEventListener("keydown", onKey, true);
@@ -69,6 +74,7 @@ export function SyncConfirmDialog({
         className="w-[440px] max-w-[90vw] rounded-xl border border-line bg-surface-elevated p-5 shadow-2xl"
         onSubmit={(event) => {
           event.preventDefault();
+          if (busy) return;
           if (!empty) onConfirm();
           else onCancel();
         }}
@@ -80,7 +86,8 @@ export function SyncConfirmDialog({
           <button
             type="button"
             onClick={onCancel}
-            className="rounded p-0.5 text-ink-subtle hover:bg-hover hover:text-ink"
+            disabled={busy}
+            className="rounded p-0.5 text-ink-subtle hover:bg-hover hover:text-ink disabled:opacity-50"
           >
             <X size={15} />
           </button>
@@ -96,8 +103,9 @@ export function SyncConfirmDialog({
           {!empty && (
             <button
               type="button"
-              className="rounded-md px-3 py-1.5 text-[12px] text-ink-muted hover:text-ink"
+              className="rounded-md px-3 py-1.5 text-[12px] text-ink-muted hover:text-ink disabled:opacity-50"
               onClick={onCancel}
+              disabled={busy}
             >
               取消
             </button>
@@ -105,10 +113,11 @@ export function SyncConfirmDialog({
           <button
             ref={confirmRef}
             type="submit"
+            disabled={busy}
             className={
               !empty && copy.danger
-                ? "rounded-md bg-(--color-danger) px-3 py-1.5 text-[12px] text-white hover:opacity-90"
-                : "rounded-md bg-btn px-3 py-1.5 text-[12px] text-btn-fg hover:opacity-90"
+                ? "rounded-md bg-(--color-danger) px-3 py-1.5 text-[12px] text-white hover:opacity-90 disabled:opacity-50"
+                : "rounded-md bg-btn px-3 py-1.5 text-[12px] text-btn-fg hover:opacity-90 disabled:opacity-50"
             }
           >
             {empty ? "关闭" : direction === "upload" ? "上传" : "下载"}
@@ -143,16 +152,20 @@ export function GitPatchConfirmDialog({
   preview,
   onConfirm,
   onCancel,
+  busy = false,
 }: {
   preview: GitPatchPreview;
   onConfirm: () => void;
   onCancel: () => void;
+  busy?: boolean;
 }) {
   const copy = gitPatchConfirmCopy(preview);
   const empty = !gitPatchHasChanges(preview);
   const confirmRef = useRef<HTMLButtonElement>(null);
   const onCancelRef = useRef(onCancel);
+  const busyRef = useRef(busy);
   onCancelRef.current = onCancel;
+  busyRef.current = busy;
 
   useEffect(() => {
     confirmRef.current?.focus();
@@ -160,6 +173,7 @@ export function GitPatchConfirmDialog({
       if (event.key !== "Escape") return;
       event.preventDefault();
       event.stopPropagation();
+      if (busyRef.current) return;
       onCancelRef.current();
     }
     window.addEventListener("keydown", onKey, true);
@@ -177,6 +191,7 @@ export function GitPatchConfirmDialog({
         className="w-[440px] max-w-[90vw] rounded-xl border border-line bg-surface-elevated p-5 shadow-2xl"
         onSubmit={(event) => {
           event.preventDefault();
+          if (busy) return;
           if (!empty) onConfirm();
           else onCancel();
         }}
@@ -188,7 +203,8 @@ export function GitPatchConfirmDialog({
           <button
             type="button"
             onClick={onCancel}
-            className="rounded p-0.5 text-ink-subtle hover:bg-hover hover:text-ink"
+            disabled={busy}
+            className="rounded p-0.5 text-ink-subtle hover:bg-hover hover:text-ink disabled:opacity-50"
           >
             <X size={15} />
           </button>
@@ -205,8 +221,9 @@ export function GitPatchConfirmDialog({
           {!empty && (
             <button
               type="button"
-              className="rounded-md px-3 py-1.5 text-[12px] text-ink-muted hover:text-ink"
+              className="rounded-md px-3 py-1.5 text-[12px] text-ink-muted hover:text-ink disabled:opacity-50"
               onClick={onCancel}
+              disabled={busy}
             >
               取消
             </button>
@@ -214,10 +231,11 @@ export function GitPatchConfirmDialog({
           <button
             ref={confirmRef}
             type="submit"
+            disabled={busy}
             className={
               !empty && copy.danger
-                ? "rounded-md bg-(--color-danger) px-3 py-1.5 text-[12px] text-white hover:opacity-90"
-                : "rounded-md bg-btn px-3 py-1.5 text-[12px] text-btn-fg hover:opacity-90"
+                ? "rounded-md bg-(--color-danger) px-3 py-1.5 text-[12px] text-white hover:opacity-90 disabled:opacity-50"
+                : "rounded-md bg-btn px-3 py-1.5 text-[12px] text-btn-fg hover:opacity-90 disabled:opacity-50"
             }
           >
             {empty ? "关闭" : "应用"}
