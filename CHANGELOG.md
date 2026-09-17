@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - 启动后若有新版本，底部弹出提示卡片，可前往 GitHub Releases 下载。
+- 文件资源管理器顶栏可切换本机 Git 分支。
+- 可将远程工作区未提交改动以补丁应用到本机（需同一提交）；不能从本机打到远程。
 
 ### Changed
 - 设置中点击「检查更新」若发现新版本，直接打开 GitHub Releases 页面。
