@@ -102,6 +102,31 @@ export interface SyncPreview {
   deleted_count: number;
 }
 
+export interface GitRepoStatus {
+  has_git: boolean;
+  current: string;
+  branches: string[];
+}
+
+export interface GitPatchPreview {
+  added: string[];
+  modified: string[];
+  deleted: string[];
+  added_count: number;
+  modified_count: number;
+  deleted_count: number;
+  local_dirty: boolean;
+  local_head: string;
+  remote_head: string;
+}
+
+export interface GitPatchResult {
+  files: number;
+  added: number;
+  modified: number;
+  deleted: number;
+}
+
 export type SyncPhase = "running" | "done" | "error";
 
 export type SyncFileOp = "add" | "modify" | "delete" | "";

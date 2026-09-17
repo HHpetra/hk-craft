@@ -648,15 +648,16 @@ fn bump_percent(progress: &mut SyncProgress) {
     progress.percent = progress.percent.max(next).min(95);
 }
 
-fn missing_bin(bin: &str) -> AppError {
+pub(crate) fn missing_bin(bin: &str) -> AppError {
     match bin {
         "unison" => AppError::msg("未找到 unison，请安装 Unison 并加入 PATH"),
         "ssh" => AppError::msg("未找到 ssh，请安装 OpenSSH 客户端"),
+        "git" => AppError::msg("未找到 git，请安装 Git 并加入 PATH"),
         _ => AppError::msg(format!("未找到 {bin}")),
     }
 }
 
-fn hidden_command(bin: &str) -> Command {
+pub(crate) fn hidden_command(bin: &str) -> Command {
     let mut cmd = Command::new(bin);
     #[cfg(windows)]
     {
@@ -667,7 +668,7 @@ fn hidden_command(bin: &str) -> Command {
     cmd
 }
 
-fn wait_child(
+pub(crate) fn wait_child(
     child: &mut std::process::Child,
     deadline: Instant,
     bin: &str,
@@ -1161,7 +1162,7 @@ fn run_preview(
     }
 }
 
-fn project_sync_fields(state: &State<AppState>, project_id: &str) -> AppResult<(PathBuf, String, String, String)> {
+pub(crate) fn project_sync_fields(state: &State<AppState>, project_id: &str) -> AppResult<(PathBuf, String, String, String)> {
     let cfg = state.config.lock().expect("config lock");
     let project = cfg
         .projects

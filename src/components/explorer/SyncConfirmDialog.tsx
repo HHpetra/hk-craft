@@ -6,7 +6,8 @@ import {
   previewHasChanges,
   syncConfirmCopy,
 } from "../../lib/remoteSync";
-import type { SyncDirection, SyncPreview } from "../../types";
+import { gitPatchConfirmCopy, gitPatchHasChanges } from "../../lib/gitPatch";
+import type { GitPatchPreview, SyncDirection, SyncPreview } from "../../types";
 
 export function SyncScanDialog({ direction }: { direction: SyncDirection }) {
   const title = direction === "upload" ? "上传到远程" : "从远程下载";
@@ -111,6 +112,115 @@ export function SyncConfirmDialog({
             }
           >
             {empty ? "关闭" : direction === "upload" ? "上传" : "下载"}
+          </button>
+        </div>
+      </form>
+    </div>,
+    document.body,
+  );
+}
+
+export function GitPatchScanDialog() {
+  return createPortal(
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-[2px]"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="git-patch-scan-title"
+    >
+      <div className="w-[400px] max-w-[90vw] rounded-xl border border-line bg-surface-elevated p-5 shadow-2xl">
+        <h2 id="git-patch-scan-title" className="mb-3 text-[13px] font-semibold text-ink">
+          拉取改动
+        </h2>
+        <p className="text-[12px] leading-5 text-ink-muted">正在扫描远程未提交改动…</p>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+export function GitPatchConfirmDialog({
+  preview,
+  onConfirm,
+  onCancel,
+}: {
+  preview: GitPatchPreview;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const copy = gitPatchConfirmCopy(preview);
+  const empty = !gitPatchHasChanges(preview);
+  const confirmRef = useRef<HTMLButtonElement>(null);
+  const onCancelRef = useRef(onCancel);
+  onCancelRef.current = onCancel;
+
+  useEffect(() => {
+    confirmRef.current?.focus();
+    function onKey(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      onCancelRef.current();
+    }
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, []);
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-[2px]"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="git-patch-confirm-title"
+    >
+      <form
+        className="w-[440px] max-w-[90vw] rounded-xl border border-line bg-surface-elevated p-5 shadow-2xl"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (!empty) onConfirm();
+          else onCancel();
+        }}
+      >
+        <div className="mb-4 flex items-center justify-between">
+          <h2 id="git-patch-confirm-title" className="text-[13px] font-semibold text-ink">
+            {copy.title}
+          </h2>
+          <button
+            type="button"
+            onClick={onCancel}
+            className="rounded p-0.5 text-ink-subtle hover:bg-hover hover:text-ink"
+          >
+            <X size={15} />
+          </button>
+        </div>
+        <p className="mb-3 whitespace-pre-wrap text-[12px] leading-5 text-ink-muted">{copy.message}</p>
+        {!empty && (
+          <div className="mb-4 max-h-48 space-y-3 overflow-auto text-[12px] leading-5">
+            <PathGroup label="增加" paths={preview.added} total={preview.added_count} />
+            <PathGroup label="覆盖" paths={preview.modified} total={preview.modified_count} />
+            <PathGroup label="删除" paths={preview.deleted} total={preview.deleted_count} />
+          </div>
+        )}
+        <div className="flex justify-end gap-2">
+          {!empty && (
+            <button
+              type="button"
+              className="rounded-md px-3 py-1.5 text-[12px] text-ink-muted hover:text-ink"
+              onClick={onCancel}
+            >
+              取消
+            </button>
+          )}
+          <button
+            ref={confirmRef}
+            type="submit"
+            className={
+              !empty && copy.danger
+                ? "rounded-md bg-(--color-danger) px-3 py-1.5 text-[12px] text-white hover:opacity-90"
+                : "rounded-md bg-btn px-3 py-1.5 text-[12px] text-btn-fg hover:opacity-90"
+            }
+          >
+            {empty ? "关闭" : "应用"}
           </button>
         </div>
       </form>

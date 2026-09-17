@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { notePtyUserInput } from "./ptyActivity";
-import type { AppConfig, DockerContainer, FileEntry, PtySessionStat, SpawnOpts, SpawnResult, SyncDirection, SyncPreview, SyncResult } from "../types";
+import type { AppConfig, DockerContainer, FileEntry, GitPatchPreview, GitPatchResult, GitRepoStatus, PtySessionStat, SpawnOpts, SpawnResult, SyncDirection, SyncPreview, SyncResult } from "../types";
 
 export function loadConfig() {
   return invoke<AppConfig>("load_config");
@@ -143,4 +143,24 @@ export function syncConfirm(projectId: string, direction: SyncDirection) {
 
 export function syncAbort(projectId: string) {
   return invoke<void>("sync_abort", { projectId });
+}
+
+export function gitStatus(projectId: string) {
+  return invoke<GitRepoStatus>("git_status", { projectId });
+}
+
+export function gitCheckout(projectId: string, branch: string) {
+  return invoke<GitRepoStatus>("git_checkout", { projectId, branch });
+}
+
+export function gitPatchPreview(projectId: string) {
+  return invoke<GitPatchPreview>("git_patch_preview", { projectId });
+}
+
+export function gitPatchApply(projectId: string) {
+  return invoke<GitPatchResult>("git_patch_apply", { projectId });
+}
+
+export function gitPatchAbort(projectId: string) {
+  return invoke<void>("git_patch_abort", { projectId });
 }

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { Download, Folder, File as FileIcon, LayoutGrid, List, Search, Upload } from "lucide-react";
+import { Download, Folder, File as FileIcon, GitCompare, LayoutGrid, List, Search, Upload } from "lucide-react";
 import type { DragEvent, KeyboardEvent, MouseEvent, PointerEvent, ReactNode } from "react";
 import {
+  checkDir,
   clipboardWriteText,
   fsCopy,
   fsCreate,
@@ -12,6 +13,11 @@ import {
   fsOpen,
   fsRename,
   fsReveal,
+  gitCheckout,
+  gitPatchAbort,
+  gitPatchApply,
+  gitPatchPreview,
+  gitStatus,
   syncAbort,
   syncConfirm,
   syncPreview,
@@ -22,6 +28,7 @@ import { beginPathDrag } from "../../lib/dnd";
 import { minColumnPct, normalizeColumnWidths, resizeAdjacent } from "../../lib/explorerColumns";
 import { deleteConfirmCopy } from "../../lib/explorerDelete";
 import { previewHasChanges, remoteSyncConfigured, syncDoneNotice } from "../../lib/remoteSync";
+import { gitPatchDoneNotice, gitPatchHasChanges } from "../../lib/gitPatch";
 import { appendSyncLog, emptySyncProgress } from "../../lib/syncProgress";
 import {
   applyClear,
@@ -32,11 +39,21 @@ import {
   type ExplorerSelection,
 } from "../../lib/explorerSelect";
 import { breadcrumbParts, cn, formatAgentInject, formatSize, formatTime, pathsEqual } from "../../lib/format";
-import type { Bookmark, ExplorerView, FileEntry, Project, SyncDirection, SyncPreview, SyncProgress } from "../../types";
+import type {
+  Bookmark,
+  ExplorerView,
+  FileEntry,
+  GitPatchPreview,
+  GitRepoStatus,
+  Project,
+  SyncDirection,
+  SyncPreview,
+  SyncProgress,
+} from "../../types";
 import { useWorkspace } from "../../store/workspace";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { ExplorerContextMenu, type ExplorerMenuAction, type ExplorerMenuState } from "./ExplorerContextMenu";
-import { SyncConfirmDialog, SyncScanDialog } from "./SyncConfirmDialog";
+import { GitPatchConfirmDialog, GitPatchScanDialog, SyncConfirmDialog, SyncScanDialog } from "./SyncConfirmDialog";
 import { SyncProgressDialog } from "./SyncProgressDialog";
 
 type SortKey = "name" | "modified" | "kind" | "size";
@@ -139,6 +156,11 @@ export function FileExplorer({ project, paneId }: { project: Project; paneId: st
   const [syncProgress, setSyncProgress] = useState<SyncProgress | null>(null);
   const [syncLog, setSyncLog] = useState<string[]>([]);
   const [activeSync, setActiveSync] = useState<SyncDirection | null>(null);
+  const [gitRepo, setGitRepo] = useState<GitRepoStatus | null>(null);
+  const [checkingOut, setCheckingOut] = useState(false);
+  const [scanningPatch, setScanningPatch] = useState(false);
+  const [patchPreview, setPatchPreview] = useState<GitPatchPreview | null>(null);
+  const [applyingPatch, setApplyingPatch] = useState(false);
   const [clip, setClip] = useState(getFsClipboard);
   const paneRef = useRef<HTMLDivElement>(null);
   const tableRef = useRef<HTMLTableElement>(null);
@@ -163,8 +185,23 @@ export function FileExplorer({ project, paneId }: { project: Project; paneId: st
     return () => {
       parkedSyncRef.current = false;
       void syncAbort(project.id);
+      void gitPatchAbort(project.id);
     };
   }, [project.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void gitStatus(project.id)
+      .then((status) => {
+        if (!cancelled) setGitRepo(status);
+      })
+      .catch(() => {
+        if (!cancelled) setGitRepo({ has_git: false, current: "", branches: [] });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [project.id, project.path]);
 
   useEffect(() => {
     if (!project) {
@@ -235,7 +272,20 @@ export function FileExplorer({ project, paneId }: { project: Project; paneId: st
   const deleteCopy = pendingDelete ? deleteConfirmCopy(pendingDelete) : null;
   const remoteReady = remoteSyncConfigured(project);
   const remoteHint = "请先在设置中填写该项目的远程主机、用户名与目录";
-  const syncBusy = syncing || Boolean(syncProgress) || Boolean(scanningSync);
+  const hasGit = Boolean(gitRepo?.has_git);
+  const syncBusy =
+    syncing ||
+    Boolean(syncProgress) ||
+    Boolean(scanningSync) ||
+    checkingOut ||
+    scanningPatch ||
+    applyingPatch;
+  const branchOptions = useMemo(() => {
+    if (!gitRepo?.has_git) return [];
+    const names = gitRepo.branches.slice();
+    if (gitRepo.current && !names.includes(gitRepo.current)) names.unshift(gitRepo.current);
+    return names;
+  }, [gitRepo]);
 
   async function startSyncPreview(direction: SyncDirection) {
     if (syncBusy || !remoteReady) return;
@@ -310,6 +360,71 @@ export function FileExplorer({ project, paneId }: { project: Project; paneId: st
       setNotice(String(err));
     } finally {
       unlisten();
+    }
+  }
+
+  async function refreshAfterGit() {
+    const exists = await checkDir(current);
+    if (!exists) {
+      if (current !== project.path) setCurrent(project.path);
+      else await reload();
+      return;
+    }
+    await reload();
+  }
+
+  async function checkoutBranch(branch: string) {
+    if (!gitRepo || branch === gitRepo.current || syncBusy) return;
+    setCheckingOut(true);
+    try {
+      const next = await gitCheckout(project.id, branch);
+      setGitRepo(next);
+      await refreshAfterGit();
+    } catch (err) {
+      setNotice(String(err));
+    } finally {
+      setCheckingOut(false);
+    }
+  }
+
+  async function startPatchPreview() {
+    if (syncBusy || !remoteReady || !hasGit) return;
+    setScanningPatch(true);
+    setPatchPreview(null);
+    try {
+      const preview = await gitPatchPreview(project.id);
+      setPatchPreview(preview);
+    } catch (err) {
+      setNotice(String(err));
+      setScanningPatch(false);
+      setPatchPreview(null);
+    }
+  }
+
+  function cancelPatchPreview() {
+    setScanningPatch(false);
+    setPatchPreview(null);
+    void gitPatchAbort(project.id);
+  }
+
+  async function confirmPatchPreview() {
+    if (!patchPreview || !gitPatchHasChanges(patchPreview)) {
+      cancelPatchPreview();
+      return;
+    }
+    setScanningPatch(false);
+    setPatchPreview(null);
+    setApplyingPatch(true);
+    try {
+      const result = await gitPatchApply(project.id);
+      setNotice(gitPatchDoneNotice(result));
+      await refreshAfterGit();
+      const status = await gitStatus(project.id);
+      setGitRepo(status);
+    } catch (err) {
+      setNotice(String(err));
+    } finally {
+      setApplyingPatch(false);
     }
   }
 
@@ -698,6 +813,21 @@ export function FileExplorer({ project, paneId }: { project: Project; paneId: st
               </span>
             ))}
           </nav>
+          {hasGit && gitRepo && (
+            <select
+              value={gitRepo.current}
+              disabled={syncBusy || branchOptions.length === 0}
+              title="切换本地 Git 分支"
+              className="max-w-36 shrink-0 truncate rounded-md bg-field px-1.5 py-1 text-[12px] text-ink outline-none disabled:cursor-not-allowed disabled:opacity-40"
+              onChange={(event) => void checkoutBranch(event.target.value)}
+            >
+              {branchOptions.map((branch) => (
+                <option key={branch} value={branch}>
+                  {branch}
+                </option>
+              ))}
+            </select>
+          )}
           <div className="flex shrink-0">
             <button
               type="button"
@@ -717,6 +847,17 @@ export function FileExplorer({ project, paneId }: { project: Project; paneId: st
             >
               <Download size={14} />
             </button>
+            {hasGit && (
+              <button
+                type="button"
+                title={remoteReady ? "拉取远程未提交改动" : remoteHint}
+                disabled={!remoteReady || syncBusy}
+                className="rounded p-1 text-ink-subtle hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+                onClick={() => void startPatchPreview()}
+              >
+                <GitCompare size={14} />
+              </button>
+            )}
           </div>
           <label className="flex items-center gap-1 rounded-md bg-field px-2 py-1 text-ink-muted">
             <Search size={13} />
@@ -901,6 +1042,14 @@ export function FileExplorer({ project, paneId }: { project: Project; paneId: st
           preview={syncPreviewResult}
           onCancel={cancelSyncPreview}
           onConfirm={confirmSyncPreview}
+        />
+      )}
+      {scanningPatch && !patchPreview && <GitPatchScanDialog />}
+      {scanningPatch && patchPreview && (
+        <GitPatchConfirmDialog
+          preview={patchPreview}
+          onCancel={cancelPatchPreview}
+          onConfirm={() => void confirmPatchPreview()}
         />
       )}
       {activeSync && syncProgress && (

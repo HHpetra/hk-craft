@@ -3,6 +3,7 @@ mod config;
 mod docker;
 mod error;
 mod fs;
+mod git;
 mod opencode_discover;
 mod opencode_hook;
 mod pty;
@@ -23,6 +24,7 @@ pub struct AppState {
     pub config_path: PathBuf,
     pub pty: Arc<PtyManager>,
     pub sync: Arc<sync::SyncHost>,
+    pub git: Arc<git::GitHost>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -47,6 +49,7 @@ pub fn run() {
                 config_path,
                 pty,
                 sync: Arc::new(sync::SyncHost::new()),
+                git: Arc::new(git::GitHost::new()),
             });
             Ok(())
         })
@@ -82,6 +85,11 @@ pub fn run() {
             sync::sync_preview,
             sync::sync_confirm,
             sync::sync_abort,
+            git::git_status,
+            git::git_checkout,
+            git::git_patch_preview,
+            git::git_patch_apply,
+            git::git_patch_abort,
             update::fetch_latest_release_tag,
         ])
         .run(tauri::generate_context!())
