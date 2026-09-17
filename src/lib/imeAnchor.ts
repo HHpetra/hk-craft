@@ -1,4 +1,5 @@
 import type { Terminal } from "@xterm/xterm";
+import { hardwareCaret, isolatedInverseCaret, type InverseCell } from "./imeCaret";
 
 /**
  * Ink-style Agent TUIs (cursor-agent, Claude Code, OpenCode, …) draw a
@@ -30,32 +31,41 @@ export function attachImeAnchor(term: Terminal) {
     };
   }
 
-  function findVisualCaret(): { col: number; row: number } | null {
+  function viewportInverseLines(): InverseCell[][] {
     const buf = term.buffer.active;
     const startY = buf.viewportY;
-    for (let y = startY + term.rows - 1; y >= startY; y--) {
+    const lines: InverseCell[][] = [];
+    for (let y = startY; y < startY + term.rows; y++) {
       const line = buf.getLine(y);
-      if (!line) continue;
-      for (let x = line.length - 1; x >= 0; x--) {
-        const cell = line.getCell(x);
-        if (!cell?.isInverse()) continue;
-        const left = x > 0 ? line.getCell(x - 1) : null;
-        const right = x + 1 < line.length ? line.getCell(x + 1) : null;
-        if (left?.isInverse() && right?.isInverse()) continue;
-        return { col: x, row: y - startY };
+      const cells: InverseCell[] = [];
+      if (line) {
+        for (let x = 0; x < line.length; x++) {
+          const cell = line.getCell(x);
+          cells.push({
+            inverse: !!cell?.isInverse(),
+            width: cell?.getWidth() ?? 1,
+          });
+        }
       }
+      lines.push(cells);
     }
-    return null;
+    return lines;
+  }
+
+  function findVisualCaret() {
+    const buf = term.buffer.active;
+    return isolatedInverseCaret({
+      lines: viewportInverseLines(),
+      cursorCol: buf.cursorX,
+      cursorRow: buf.cursorY,
+    });
   }
 
   function caretCell() {
     const visual = findVisualCaret();
     if (visual) return visual;
     const buf = term.buffer.active;
-    return {
-      col: Math.min(Math.max(0, buf.cursorX), Math.max(0, term.cols - 1)),
-      row: Math.min(Math.max(0, buf.cursorY), Math.max(0, term.rows - 1)),
-    };
+    return hardwareCaret(buf.cursorX, buf.cursorY, term.cols, term.rows);
   }
 
   function applyPin(left: string, top: string) {
@@ -81,6 +91,9 @@ export function attachImeAnchor(term: Terminal) {
     ime.style.pointerEvents = "none";
     preedit.style.height = `${height}px`;
     preedit.style.lineHeight = `${height}px`;
+    preedit.style.fontSize = `${term.options.fontSize ?? 13}px`;
+    preedit.style.fontFamily = String(term.options.fontFamily ?? "");
+    preedit.style.whiteSpace = "nowrap";
   }
 
   function pinToCaret(useVisual: boolean) {

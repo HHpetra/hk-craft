@@ -1,6 +1,7 @@
 import { Terminal } from "@xterm/xterm";
 import type { IDisposable } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { listen } from "@tauri-apps/api/event";
 import { ptyResize, ptyWrite, clipboardReadText, clipboardWriteText } from "./api";
@@ -12,6 +13,7 @@ import { clientToCell, hostMouseUpAction, isDragGesture, sgrClick, sgrMouse, whe
 import { createMouseStripper } from "./stripMouseTracking";
 import { normalizeTheme, xtermThemes } from "./theme";
 import { primaryTerminalFont, setPreferredTerminalFont, terminalFontFamily } from "./terminalFonts";
+import { windowsPtyOptions } from "./windowsPty";
 import type { PtyExit, PtyOutput, SessionKind } from "../types";
 
 type RegistryEntry = {
@@ -36,14 +38,16 @@ function bindOscColorQuery(term: Terminal): IDisposable[] {
   return [term.parser.registerOscHandler(10, swallow), term.parser.registerOscHandler(11, swallow)];
 }
 
-function refreshWhenFontsReady(term: Terminal) {
+function refreshWhenFontsReady(entry: RegistryEntry) {
   const primary = primaryTerminalFont();
   const redraw = () => {
     try {
-      term.refresh(0, Math.max(0, term.rows - 1));
+      entry.term.refresh(0, Math.max(0, entry.term.rows - 1));
     } catch {
       // terminal not opened yet
+      return;
     }
+    scheduleFitAndResize(entry.sessionId, entry);
   };
   void document.fonts.load(`13px "${primary}"`).then(redraw);
   void document.fonts.ready.then(redraw);
@@ -235,15 +239,19 @@ function buildTerminal(sessionId: string): RegistryEntry {
   void ensurePtyListeners();
   const theme = xtermThemes[normalizeTheme(document.documentElement.dataset.theme)];
   const term = new Terminal({
+    allowProposedApi: true,
     cursorBlink: true,
     fontSize: 13,
     fontFamily: terminalFontFamily(),
     theme,
     scrollback: 5000,
-    windowsMode: navigator.userAgent.includes("Windows"),
+    rescaleOverlappingGlyphs: true,
+    windowsPty: windowsPtyOptions(),
   });
   const fit = new FitAddon();
   term.loadAddon(fit);
+  term.loadAddon(new Unicode11Addon());
+  term.unicode.activeVersion = "11";
   try {
     const webgl = new WebglAddon();
     webgl.onContextLoss(() => webgl.dispose());
@@ -451,7 +459,7 @@ function bindTerminalInput(entry: RegistryEntry) {
 function openAndRegister(entry: RegistryEntry) {
   entry.term.open(entry.host);
   bindTerminalInput(entry);
-  refreshWhenFontsReady(entry.term);
+  refreshWhenFontsReady(entry);
   registry.set(entry.sessionId, entry);
   flushPending(entry.sessionId, entry.term);
 }
@@ -470,7 +478,7 @@ export function applyRegisteredTerminalFont(preferred?: string) {
   const family = terminalFontFamily();
   for (const entry of registry.values()) {
     entry.term.options.fontFamily = family;
-    refreshWhenFontsReady(entry.term);
+    refreshWhenFontsReady(entry);
   }
 }
 

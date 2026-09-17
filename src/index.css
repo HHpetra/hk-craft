@@ -162,6 +162,7 @@ a {
 .xterm .composition-view {
   background: var(--bg-term);
   color: var(--fg);
+  white-space: nowrap;
 }
 
 /* ── Panel separator ───────────────────────────────────────── */

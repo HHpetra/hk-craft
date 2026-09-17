@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - 设置中点击「检查更新」若发现新版本，直接打开 GitHub Releases 页面。
 
+### Fixed
+- Agent 终端（含 dsh-tui）在 Windows 上中英混排不再行尾掉字或重叠：改用现代 ConPTY 换行、Unicode 11 测宽，以及等宽 CJK 字体回退；IME 预编辑钉在输入光标而不是底栏反色。
+
 ## [0.5.0] - 2026-09-15
 
 ### Added

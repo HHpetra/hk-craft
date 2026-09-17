@@ -96,8 +96,9 @@ export function terminalFontFamily(preferred = preferredTerminalFont) {
     "Cascadia Code",
     "Cascadia Mono",
     "Consolas",
+    '"Sarasa Term SC"',
+    '"Noto Sans Mono CJK SC"',
     '"Microsoft YaHei Mono"',
-    '"Microsoft YaHei"',
     "monospace",
   ].join(", ");
 }
